@@ -512,7 +512,6 @@ cardsEl.addEventListener('dragstart', (e) => {
     e.preventDefault();
     window.clp.startDrag(clip.id);
   } else {
-    // ponytail: drags the 300-char preview, newlines→spaces (terminal-safe). full-text prefetch if users drag long clips
     e.dataTransfer.setData('text/plain', (clip.preview || '').replace(/\r?\n/g, ' '));
     e.dataTransfer.effectAllowed = 'copy';
   }
