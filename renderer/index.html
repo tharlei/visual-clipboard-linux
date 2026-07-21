@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src clp: data:; media-src clp:; font-src 'self'"
+    />
+    <title>Clp</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shelf glass-panel glass-panel--shelf">
+      <div class="shelf__chrome">
+        <label class="shelf__search glass-chip glass-chip--interactive">
+          <svg class="shelf__search-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4" />
+            <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+          <input id="search" type="text" placeholder="Buscar clips…" autocomplete="off" spellcheck="false" />
+          <kbd id="shortcutHint">Ctrl+Alt+V</kbd>
+        </label>
+        <div class="shelf__tabs" id="tabs"></div>
+        <span class="glass-chip glass-chip--circle" id="settingsBtn" role="button" title="Configurações">⚙</span>
+      </div>
+
+      <div class="shelf__cards" id="cards"></div>
+
+      <div class="overlay" id="editor" hidden>
+        <div class="editor glass-panel">
+          <textarea id="editorText" spellcheck="false"></textarea>
+          <div class="editor__actions">
+            <button class="btn btn--ghost" id="editorCancel">Cancelar</button>
+            <button class="btn btn--ghost btn--accent" id="editorSave">Salvar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="settings" hidden>
+        <div class="editor glass-panel">
+          <div class="settings__title">Configurações</div>
+          <div class="settings__row">
+            <span>Atalho para abrir</span>
+            <button type="button" class="btn btn--ghost" id="shortcutCapture">Ctrl+Alt+V</button>
+          </div>
+          <div class="settings__row">
+            <span>Colar automático ao selecionar</span>
+            <input type="checkbox" id="setAutoPaste" />
+          </div>
+          <div class="settings__row">
+            <span>Atraso antes de colar (ms)</span>
+            <input type="number" id="setPasteDelay" min="0" max="2000" step="10" />
+          </div>
+          <div class="settings__row">
+            <span>Máximo de itens no histórico</span>
+            <input type="number" id="setMaxItems" min="10" max="5000" step="10" />
+          </div>
+          <div class="editor__actions">
+            <button class="btn btn--ghost" id="settingsCancel">Cancelar</button>
+            <button class="btn btn--ghost btn--accent" id="settingsSave">Salvar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="boardModal" hidden>
+        <div class="editor editor--sm glass-panel">
+          <input id="boardName" type="text" placeholder="Nome do board…" autocomplete="off" />
+          <div class="editor__actions">
+            <button class="btn btn--ghost" id="boardCancel">Cancelar</button>
+            <button class="btn btn--ghost btn--accent" id="boardCreate">Criar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
