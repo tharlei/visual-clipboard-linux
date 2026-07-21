@@ -73,7 +73,7 @@ Runs entirely on your machine. There's no server, no telemetry, no account, no n
 
 ## Contributing
 
-Issues and PRs welcome — this is a small, dependency-free Electron app (see `main.js` for the whole backend, `renderer/` for the UI) and a good target for first-time contributors.
+Issues and PRs welcome — this is a small, dependency-free Electron app (see `main.js` for the whole backend, `renderer/` for the UI) and a good target for first-time contributors. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

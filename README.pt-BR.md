@@ -70,3 +70,11 @@ Edite o arquivo e reinicie, ou use o painel ⚙ **Configurações** no app (apli
 ## Segurança e privacidade
 
 Roda inteiramente na sua máquina. Não tem servidor, telemetria, conta ou chamadas de rede — nada é monitorado ou enviado a lugar nenhum. Seu histórico nunca sai de `~/.local/share/visual-clipboard/`.
+
+## Contribuindo
+
+Issues e PRs são bem-vindos — é um app Electron pequeno e sem dependências externas (veja `main.js` pro backend inteiro, `renderer/` pra UI), ótimo pra quem quer contribuir pela primeira vez. Veja [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licença
+
+[MIT](LICENSE)
