@@ -12,7 +12,7 @@ Código aberto (MIT) — faça fork, modifique, use como quiser.
 ## Requisitos
 
 - Linux com X11 (testado em Zorin OS / GNOME)
-- Node.js >= 18
+- Node.js >= 22.12 (exigido pelo Electron 43)
 - `xdotool` para colagem automática: `sudo apt install xdotool` (sem ele, o clip só é copiado — cole com Ctrl+V)
 
 ## Instalação
@@ -31,9 +31,9 @@ cd visual-clipboard-linux
 ./install.sh
 ```
 
-Instala nos lugares padrão por usuário do Linux — `~/.local/share/visual-clipboard/app` (código), `~/.local/bin/visual-clipboard` (launcher), `~/.local/share/applications` (entrada no menu de apps) — e baixa o Electron via `npm install` (~150MB, só na primeira vez). Depois é só rodar `visual-clipboard` ou abrir "Visual Clipboard" no menu de aplicativos.
+Instala nos lugares padrão por usuário do Linux — `~/.local/share/visual-clipboard/app` (código), `~/.local/bin/visual-clipboard` (launcher), `~/.local/share/applications` (entrada no menu de apps) — e baixa o Electron (~150MB, só na primeira vez). O app abre assim que a instalação termina — depois disso, é só rodar `visual-clipboard` ou abrir "Visual Clipboard" no menu de aplicativos.
 
-Para remover: `visual-clipboard --uninstall` (o histórico em `~/.local/share/visual-clipboard/*.json` é preservado — apague essa pasta também para limpar tudo).
+Para remover: `visual-clipboard --uninstall`. Ele pergunta se você quer manter o histórico de clips ou apagar tudo; use `--purge` para pular a pergunta e limpar tudo de uma vez.
 
 ### Desenvolvimento / rodar direto da fonte
 
@@ -65,7 +65,7 @@ Tudo 100% local em `~/.local/share/visual-clipboard/`:
 { "shortcut": "Control+Alt+V", "maxItems": 500, "autoPaste": true, "pasteDelayMs": 150 }
 ```
 
-Edite o arquivo e reinicie, ou use o painel ⚙ **Configurações** no app (aplica na hora). O instalador também pergunta algumas dessas opções na primeira vez.
+Edite o arquivo e reinicie, ou use o painel ⚙ **Configurações** no app (aplica na hora). Rodar `./install.sh` pelo terminal pergunta algumas dessas opções na primeira vez; o comando `curl | bash` não tem como perguntar, então usa os padrões acima.
 
 ## Segurança e privacidade
 
@@ -73,7 +73,7 @@ Roda inteiramente na sua máquina. Não tem servidor, telemetria, conta ou chama
 
 ## Contribuindo
 
-Issues e PRs são bem-vindos — é um app Electron pequeno e sem dependências externas (veja `main.js` pro backend inteiro, `renderer/` pra UI), ótimo pra quem quer contribuir pela primeira vez. Veja [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues e PRs são bem-vindos — é um app Electron pequeno e sem dependências de runtime (veja `src/` pro backend — um arquivo por feature — e `renderer/` pra UI), ótimo pra quem quer contribuir pela primeira vez. Veja [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licença
 
