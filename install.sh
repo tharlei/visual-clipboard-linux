@@ -146,7 +146,13 @@ AUTO
   esac
 fi
 
+# Start it now — GNOME Shell caches the app list, so the menu icon often doesn't
+# show up until the next login and a fresh install otherwise looks like nothing happened.
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  setsid "$BIN_DIR/$APP_NAME" >/dev/null 2>&1 < /dev/null &
+fi
+
 echo ""
-echo "Done! Launch with '$APP_NAME', or find \"Visual Clipboard\" in your app menu."
-echo "Default shortcut once running: Ctrl+Alt+V"
+echo "Done! Visual Clipboard is running — press Ctrl+Alt+V to open it."
+echo "Next time: launch with '$APP_NAME', or find \"Visual Clipboard\" in your app menu."
 echo "To remove later: $APP_NAME --uninstall"
