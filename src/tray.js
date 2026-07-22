@@ -33,7 +33,7 @@ function setAutostart(on) {
         '',
       ].join('\n'));
     } else {
-      fs.unlinkSync(AUTOSTART_FILE);
+      fs.rmSync(AUTOSTART_FILE, { force: true });
     }
   } catch (err) {
     console.error('[clp] autostart:', err);
@@ -46,7 +46,9 @@ function updateTrayMenu() {
     { label: `Abrir (${state.config.shortcut.replace('Control', 'Ctrl')})`, click: () => showPanel() },
     { label: 'Configurações…', click: () => { showPanel(); state.win.webContents.send('settings:open'); } },
     { label: 'Limpar histórico', click: () => { clearHistory(); } },
-    { type: 'checkbox', label: 'Iniciar com o sistema', checked: isAutostart(), click: (item) => setAutostart(item.checked) },
+    // ponytail: toggle off the filesystem, not item.checked — AppIndicator (Linux tray) doesn't
+    // flip a checkbox's state on click, so item.checked reports the old value and nothing happens.
+    { type: 'checkbox', label: 'Iniciar com o sistema', checked: isAutostart(), click: () => { setAutostart(!isAutostart()); updateTrayMenu(); } },
     { type: 'separator' },
     { label: 'Sair', click: () => { app.exit(0); } },
   ]));
