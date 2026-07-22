@@ -54,6 +54,12 @@ cp "$SCRIPT_DIR"/assets/icon.png "$SCRIPT_DIR"/assets/icon.svg "$INSTALL_DIR"/as
 echo "Installing dependencies (downloads Electron, ~150MB, may take a while)..."
 (cd "$INSTALL_DIR" && npm install)
 
+# Electron 43 dropped the postinstall hook that fetched the binary, so `npm install`
+# alone leaves node_modules/electron/dist missing and the app silently won't start.
+ELECTRON_BIN="$INSTALL_DIR/node_modules/electron/dist/electron"
+[ -x "$ELECTRON_BIN" ] || (cd "$INSTALL_DIR" && node node_modules/electron/install.js)
+[ -x "$ELECTRON_BIN" ] || { echo "Electron binary download failed — check your connection and re-run."; exit 1; }
+
 cat > "$BIN_DIR/$APP_NAME" <<LAUNCHER
 #!/usr/bin/env bash
 if [ "\${1:-}" = "--uninstall" ]; then
