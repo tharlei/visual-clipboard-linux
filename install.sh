@@ -13,17 +13,37 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 CONFIG_JSON="$HOME/.local/share/$APP_NAME/config.json"
 
 uninstall() {
+  # Ask before touching clip history — it's the only thing here that isn't re-creatable
+  # by re-running this script. Non-interactive (curl | bash) keeps the data.
+  local purge=n
+  if [ "${1:-}" = "--purge" ]; then
+    purge=y
+  elif [ -t 0 ]; then
+    echo "Como remover o Visual Clipboard?"
+    echo "  1) Desinstalação segura — remove o app, mantém histórico e configurações (padrão)"
+    echo "  2) Apagar tudo — remove também o histórico de clips, imagens e configurações"
+    read -r -p "Escolha [1/2]: " _opt
+    [ "$_opt" = "2" ] && purge=y
+  fi
+
   echo "Removing Visual Clipboard..."
+  # match on the app dir, not the process name: an unpackaged Electron app is just "electron"
+  pkill -f "$INSTALL_DIR" 2>/dev/null || true
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_DIR/$APP_NAME"
   rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
   rm -f "$HOME/.config/autostart/$APP_NAME.desktop"
   update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
-  echo "Done. Your clip history is still at ~/.local/share/$APP_NAME/*.json — delete that folder too for a full wipe."
+  if [ "$purge" = y ]; then
+    rm -rf "$HOME/.local/share/$APP_NAME" "$HOME/.config/$APP_NAME"
+    echo "Done. Everything removed, including your clip history."
+  else
+    echo "Done. Your clip history is still at ~/.local/share/$APP_NAME — re-run with '--uninstall --purge' to delete it too."
+  fi
   exit 0
 }
 
-[ "${1:-}" = "--uninstall" ] && uninstall
+[ "${1:-}" = "--uninstall" ] && uninstall "${2:-}"
 
 # Running as a local checkout (./install.sh) vs. piped in (curl ... | bash, where
 # BASH_SOURCE points at a fd/pipe, not a real file next to the app's sources).
@@ -63,13 +83,34 @@ ELECTRON_BIN="$INSTALL_DIR/node_modules/electron/dist/electron"
 cat > "$BIN_DIR/$APP_NAME" <<LAUNCHER
 #!/usr/bin/env bash
 if [ "\${1:-}" = "--uninstall" ]; then
+  # Ask before touching clip history — it's the only thing here that reinstalling
+  # can't bring back. Non-interactive callers keep the data unless --purge is passed.
+  PURGE=n
+  if [ "\${2:-}" = "--purge" ]; then
+    PURGE=y
+  elif [ -t 0 ]; then
+    echo "Como remover o Visual Clipboard?"
+    echo "  1) Desinstalação segura — remove o app, mantém histórico e configurações (padrão)"
+    echo "  2) Apagar tudo — remove também o histórico de clips, imagens e configurações"
+    read -r -p "Escolha [1/2]: " _opt
+    [ "\$_opt" = "2" ] && PURGE=y
+  fi
+
   echo "Removing Visual Clipboard..."
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_DIR/$APP_NAME"
   rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
   rm -f "$HOME/.config/autostart/$APP_NAME.desktop"
   update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
-  echo "Done. Your clip history is still at ~/.local/share/$APP_NAME/*.json — delete that folder too for a full wipe."
+  if [ "\$PURGE" = y ]; then
+    rm -rf "$HOME/.local/share/$APP_NAME" "$HOME/.config/$APP_NAME"
+    echo "Done. Everything removed, including your clip history."
+  else
+    echo "Done. Your clip history is still at ~/.local/share/$APP_NAME — run '$APP_NAME --uninstall --purge' to delete it too."
+  fi
+  # the running instance holds the tray icon and global shortcut — drop it last.
+  # match on the app dir, not the process name: an unpackaged Electron app is just "electron".
+  pkill -f "$INSTALL_DIR" 2>/dev/null || true
   exit 0
 fi
 # --no-sandbox: Ubuntu/Zorin 24.04+ restrict unprivileged user namespaces via
