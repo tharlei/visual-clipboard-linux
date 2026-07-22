@@ -45,8 +45,9 @@ if ! command -v xdotool >/dev/null 2>&1; then
 fi
 
 echo "Installing Visual Clipboard to $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR/renderer" "$INSTALL_DIR/assets" "$BIN_DIR" "$DESKTOP_DIR"
+mkdir -p "$INSTALL_DIR/renderer" "$INSTALL_DIR/assets" "$INSTALL_DIR/src" "$BIN_DIR" "$DESKTOP_DIR"
 cp "$SCRIPT_DIR"/main.js "$SCRIPT_DIR"/preload.js "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/
+cp "$SCRIPT_DIR"/src/*.js "$INSTALL_DIR"/src/
 cp "$SCRIPT_DIR"/renderer/*.html "$SCRIPT_DIR"/renderer/*.css "$SCRIPT_DIR"/renderer/*.js "$INSTALL_DIR"/renderer/
 cp "$SCRIPT_DIR"/assets/icon.png "$SCRIPT_DIR"/assets/icon.svg "$INSTALL_DIR"/assets/
 
