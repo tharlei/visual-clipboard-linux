@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('clp', {
   get: () => ipcRenderer.invoke('clips:get'),
@@ -19,5 +19,9 @@ contextBridge.exposeInMainWorld('clp', {
   startDrag: (id) => ipcRenderer.send('clips:startDrag', id),
   onChanged: (cb) => ipcRenderer.on('clips:changed', (_e, snap) => cb(snap)),
   onShown: (cb) => ipcRenderer.on('panel:shown', () => cb()),
+  onHidden: (cb) => ipcRenderer.on('panel:hidden', () => cb()),
+  // called by the renderer AFTER it drops the cards, so the decoded bitmaps are
+  // already unreferenced when Chromium's image cache is flushed
+  purgeCache: () => { if (webFrame && typeof webFrame.clearCache === 'function') webFrame.clearCache(); },
   onSettings: (cb) => ipcRenderer.on('settings:open', () => cb()),
 });

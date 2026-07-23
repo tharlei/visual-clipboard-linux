@@ -2,7 +2,7 @@
 
 const { app, globalShortcut } = require('electron');
 
-const { POLL_MS } = require('./src/constants');
+const { POLL_MS, DEBUG } = require('./src/constants');
 const state = require('./src/state');
 const { loadStore, saveStore } = require('./src/storage');
 // requiring protocol.js also registers the clp:// scheme as privileged (must happen before ready)
@@ -33,7 +33,16 @@ if (!app.requestSingleInstanceLock()) {
       state.win.webContents.once('did-finish-load', () => showPanel(false));
     }
     try { state.lastSig = readClipboard().sig; } catch { state.lastSig = null; }
+    state.pollNow = poll;
     setInterval(poll, POLL_MS);
+
+    if (DEBUG) {
+      setInterval(() => {
+        const per = app.getAppMetrics()
+          .map((p) => `${p.type}=${Math.round(p.memory.workingSetSize / 1024)}MB`).join(' ');
+        console.log(`[clp] mem sig=${String(state.lastSig).slice(0, 10)} ${per}`);
+      }, 20000);
+    }
   });
 
   app.on('window-all-closed', () => { /* tray app: keep running */ });

@@ -30,7 +30,6 @@ function createWindow() {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
     },
   });
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -46,11 +45,17 @@ function createWindow() {
     win.hide();
   });
   win.on('close', (e) => { e.preventDefault(); win.hide(); });
+  // covers every hide path (blur, close, Escape, select) — renderer purges its DOM on this
+  win.on('hide', () => win.webContents.send('panel:hidden'));
 }
 
 function showPanel(activate = true) {
   positionWindow();
   shownAt = Date.now();
+  // the poll skips unchanged image targets to avoid Chromium's per-read retention, so
+  // force one fresh read now — the history must be current when the user looks at it
+  state.imageDue = true;
+  if (state.pollNow) state.pollNow();
   if (activate) {
     state.win.show();
     state.win.focus();
@@ -94,6 +99,7 @@ function snapshot() {
       h: c.h,
     })),
     boards: state.store.boards,
+    visible: !!(state.win && state.win.isVisible()),
     config: {
       shortcut: state.config.shortcut,
       autoPaste: state.config.autoPaste,

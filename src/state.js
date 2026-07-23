@@ -12,4 +12,6 @@ module.exports = {
   store: { version: 1, boards: [], clips: [] },
   lastSig: undefined,
   hasXdotool: false,
+  imageDue: true,
+  pollNow: null,
 };

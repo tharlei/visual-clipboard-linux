@@ -7,7 +7,7 @@ const path = require('node:path');
 const { fileURLToPath, pathToFileURL } = require('node:url');
 
 const {
-  DATA_DIR, MAX_IMAGE_BYTES, MAX_TEXT_CHARS,
+  DATA_DIR, THUMBS_DIR, MAX_IMAGE_BYTES, MAX_TEXT_CHARS,
   GNOME_FILES_FORMAT, VIDEO_EXTS, IMAGE_EXTS, DEBUG,
 } = require('./constants');
 const state = require('./state');
@@ -15,6 +15,7 @@ const { saveStore, saveDebounced, newId, sha } = require('./storage');
 const { broadcast, hidePanel } = require('./window');
 
 let imgGate = { len: -1, head: null, sig: null };
+let lastFmtKey = null;
 let pollCount = 0;
 
 // ---------- reading ----------
@@ -46,6 +47,15 @@ function shaImage(png) {
 function readClipboard() {
   const formats = clipboard.availableFormats();
 
+  // availableFormats() is free; reading the bytes of a selection owned by another X11
+  // client is not — Chromium retains a copy of the whole buffer on every call. Treat a
+  // change in the target list as the only routine reason to re-read image bytes.
+  const fmtKey = formats.join('|');
+  if (fmtKey !== lastFmtKey) {
+    lastFmtKey = fmtKey;
+    state.imageDue = true;
+  }
+
   if (formats.includes('x-kde-passwordManagerHint')) {
     return { sig: 'secret:' + sha(clipboard.readText() || ''), skip: true };
   }
@@ -58,16 +68,28 @@ function readClipboard() {
     if (files.length) return { sig: 'F:' + sha(fileBuf), kind: 'file', files };
   }
 
-  if (formats.some((f) => f.startsWith('image/'))) {
-    let png = clipboard.readBuffer('image/png');
-    if (!png || !png.length) {
-      const img = clipboard.readImage();
-      png = img.isEmpty() ? null : img.toPNG();
-    }
-    if (png && png.length) {
+  const imgFormat = formats.find((f) => f.startsWith('image/'));
+  if (imgFormat) {
+    // an unchanged image target list means the same image: re-reading it 2x/s would retain
+    // the whole PNG every time (GBs per hour). showPanel() sets imageDue so a second image
+    // copied from the same app is still picked up before the user looks at the history.
+    if (!state.imageDue) return { sig: state.lastSig };
+    state.imageDue = false;
+    const png = clipboard.readBuffer('image/png');
+    if (png.length) {
       if (png.length > MAX_IMAGE_BYTES) return { sig: 'I:big:' + png.length, skip: true };
       return { sig: 'I:' + shaImage(png), kind: 'image', png };
     }
+    // clipboard.readImage() decodes the bitmap and leaks ~10 KB per megapixel inside
+    // Chromium's X11 clipboard — at 2 polls/s that is GBs per hour. readBuffer never
+    // decodes, so hash the raw target bytes and only decode when they actually change.
+    const raw = clipboard.readBuffer(imgFormat);
+    const sig = raw.length ? 'I:' + shaImage(raw) : 'I:fmt:' + imgFormat;
+    if (sig === state.lastSig) return { sig };
+    const img = clipboard.readImage();
+    const decoded = img.isEmpty() ? null : img.toPNG();
+    if (!decoded || !decoded.length || decoded.length > MAX_IMAGE_BYTES) return { sig, skip: true };
+    return { sig, kind: 'image', png: decoded };
   }
 
   const text = clipboard.readText();
@@ -156,8 +178,10 @@ function capture(r) {
 }
 
 function deleteImageFile(clip) {
-  if (!clip.imageFile) return;
-  try { fs.unlinkSync(path.join(DATA_DIR, clip.imageFile)); } catch {}
+  if (clip.imageFile) {
+    try { fs.unlinkSync(path.join(DATA_DIR, clip.imageFile)); } catch {}
+  }
+  try { fs.unlinkSync(path.join(THUMBS_DIR, clip.id + '.png')); } catch {}
 }
 
 function enforceCap() {

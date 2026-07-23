@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { IMAGES_DIR, HISTORY_FILE, CONFIG_FILE, DEFAULT_CONFIG } = require('./constants');
+const { IMAGES_DIR, THUMBS_DIR, HISTORY_FILE, CONFIG_FILE, DEFAULT_CONFIG } = require('./constants');
 const state = require('./state');
 
 let saveTimer = null;
@@ -23,6 +23,7 @@ function loadJson(file, fallback) {
 
 function loadStore() {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  fs.mkdirSync(THUMBS_DIR, { recursive: true });
   state.store = loadJson(HISTORY_FILE, { version: 1, boards: [], clips: [] });
   state.config = loadJson(CONFIG_FILE, DEFAULT_CONFIG);
   if (!fs.existsSync(CONFIG_FILE)) saveJsonAtomic(CONFIG_FILE, state.config);

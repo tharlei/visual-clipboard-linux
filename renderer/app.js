@@ -47,6 +47,9 @@ const state = {
   pendingShortcut: 'Control+Alt+V',
 };
 
+// panel hidden = zero DOM work; main sends panel:shown / panel:hidden on every show/hide path
+let panelVisible = false;
+
 const $ = (sel) => document.querySelector(sel);
 const cardsEl = $('#cards');
 const tabsEl = $('#tabs');
@@ -121,7 +124,7 @@ function renderTabs() {
 function cardBody(c) {
   if (c.type === 'image') {
     return `<div class="clip-card__body clip-card__body--media">
-      <div class="clip-card__thumb"><img src="clp://img/${c.id}" alt="" /></div>
+      <div class="clip-card__thumb"><img src="clp://thumb/${c.id}" loading="lazy" decoding="async" alt="" /></div>
       <span>${TYPE_LABELS.image} · ${relTime(c.createdAt)}</span>
     </div>`;
   }
@@ -131,7 +134,7 @@ function cardBody(c) {
     let inner;
     let label = TYPE_LABELS.file;
     if (c.fileKind === 'image') {
-      inner = `<div class="clip-card__thumb"><img src="clp://file/${c.id}/0" alt="" /></div>`;
+      inner = `<div class="clip-card__thumb"><img src="clp://thumb/${c.id}" loading="lazy" decoding="async" alt="" /></div>`;
       label = name;
     } else if (c.fileKind === 'video') {
       // transparent windows don't composite the video layer — thumbs come from an offscreen canvas
@@ -192,6 +195,7 @@ function boardPop(c) {
 }
 
 function render() {
+  if (!panelVisible) return;
   renderTabs();
   const visible = visibleClips();
   if (state.focusIndex >= visible.length) state.focusIndex = Math.max(0, visible.length - 1);
@@ -520,7 +524,13 @@ cardsEl.addEventListener('dragstart', (e) => {
 // ---------- wiring ----------
 
 function applySnapshot(snap) {
+  panelVisible = snap.visible;
   state.clips = snap.clips;
+  const liveIds = new Set(snap.clips.map((c) => c.id));
+  for (const m of [thumbCache, thumbFails]) {
+    for (const k of [...m.keys()]) if (!liveIds.has(k)) m.delete(k);
+  }
+  for (const k of [...thumbPending]) if (!liveIds.has(k)) thumbPending.delete(k);
   state.boards = snap.boards;
   state.caps = snap.caps;
   state.config = snap.config;
@@ -543,7 +553,15 @@ function applySnapshot(snap) {
 window.clp.onChanged(applySnapshot);
 window.clp.onSettings(() => openSettings());
 
+window.clp.onHidden(() => {
+  panelVisible = false;
+  state.openPopId = null;
+  cardsEl.innerHTML = ''; // free DOM, decoded bitmaps and GPU textures while hidden
+  window.clp.purgeCache();
+});
+
 window.clp.onShown(() => {
+  panelVisible = true;
   state.query = '';
   searchEl.value = '';
   state.tab = 'all';
