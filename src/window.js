@@ -45,6 +45,12 @@ function createWindow() {
     win.hide();
   });
   win.on('close', (e) => { e.preventDefault(); win.hide(); });
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit') return;
+    console.error(`[clp] renderer morreu (${details.reason}), recarregando`);
+    win.hide();
+    win.webContents.reload();
+  });
   // covers every hide path (blur, close, Escape, select) — renderer purges its DOM on this
   win.on('hide', () => win.webContents.send('panel:hidden'));
 }
