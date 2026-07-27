@@ -30,7 +30,7 @@ if (!app.requestSingleInstanceLock()) {
     // tray-only app: a manual launch (menu/command) would show no window — pop the panel once.
     // autostart passes --hidden so login boots silently into the tray.
     if (!process.argv.includes('--hidden')) {
-      state.win.webContents.once('did-finish-load', () => showPanel(false));
+      state.wins[0].webContents.once('did-finish-load', () => showPanel(false));
     }
     try { state.lastSig = readClipboard().sig; } catch { state.lastSig = null; }
     state.pollNow = poll;

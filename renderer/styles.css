@@ -1,6 +1,10 @@
 /* Clp Linux — adapted from the Clp site's Liquid Glass CSS (clp.erick.page) */
 
 :root {
+  /* native widgets (select popup, scrollbars) follow the system theme — without it the
+     dropdown renders as a white menu with the light --ink text on top: unreadable */
+  color-scheme: light dark;
+
   --font-display: "Outfit", "Cantarell", system-ui, sans-serif;
   --font-body: "Source Sans 3", "Cantarell", system-ui, sans-serif;
 
@@ -661,6 +665,22 @@ kbd {
 
 /* ——— Settings ——— */
 
+/* two columns: the panel is only 320px tall, a single column of rows overflows it */
+#settings .editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+  gap: 0.5rem 1.4rem;
+  width: min(46rem, 94vw);
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+#settings .settings__title,
+#settings .editor__actions {
+  grid-column: 1 / -1;
+}
+
 .settings__title {
   font-family: var(--font-display);
   font-size: 0.95rem;
@@ -691,6 +711,46 @@ kbd {
 
 .settings__row input[type="number"]:focus {
   border-color: var(--accent);
+}
+
+.settings__row select {
+  max-width: 12rem;
+  border: 0.5px solid var(--glass-border-soft);
+  border-radius: 8px;
+  background: var(--glass-fill-soft);
+  color: var(--ink);
+  font: 500 0.8rem/1.4 var(--font-body);
+  padding: 0.35rem 0.5rem;
+  outline: none;
+  cursor: pointer;
+}
+
+/* the popup is drawn by Chromium outside the page and ignores color-scheme on Linux: without
+   opaque colors here it is a white menu holding the light --ink text */
+.settings__row select option {
+  background-color: #ffffff;
+  color: rgba(10, 18, 28, 0.92);
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings__row select option {
+    background-color: #161e29;
+    color: rgba(245, 248, 252, 0.94);
+  }
+}
+
+.settings__row select:focus {
+  border-color: var(--accent);
+}
+
+.settings__value {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .settings__row input[type="checkbox"] {

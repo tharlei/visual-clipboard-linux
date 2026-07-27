@@ -6,12 +6,12 @@ const path = require('node:path');
 
 const { DATA_DIR, BOARD_COLORS, DEFAULT_CONFIG } = require('./constants');
 const state = require('./state');
-const { saveStore, saveDebounced, saveConfig, newId, sha } = require('./storage');
+const { saveStore, saveDebounced, saveConfig, scanUsage, pruneOrphans, newId, sha } = require('./storage');
 const {
   classifyText, deleteImageFile, enforceCap,
   writeClipToClipboard, selectClip, clearHistory,
 } = require('./clipboard');
-const { snapshot, broadcast, hidePanel, registerShortcut } = require('./window');
+const { snapshot, broadcast, hidePanel, refreshPanels, registerShortcut } = require('./window');
 const { trayIcon, updateTrayMenu } = require('./tray');
 
 function setupIpc() {
@@ -82,18 +82,27 @@ function setupIpc() {
     broadcast();
   });
   ipcMain.handle('panel:hide', () => hidePanel());
+  ipcMain.handle('stats:usage', () => {
+    const u = scanUsage();
+    return { bytes: u.bytes, images: u.images, clips: u.clips, orphans: u.orphans.length, orphanBytes: u.orphanBytes };
+  });
+  ipcMain.handle('stats:prune', () => pruneOrphans());
   ipcMain.handle('config:update', (_e, patch) => {
     const next = { ...state.config, ...(patch || {}) };
     next.autoPaste = !!next.autoPaste;
     next.pasteDelayMs = Math.max(0, Math.min(2000, Number(next.pasteDelayMs) || 0));
     next.maxItems = Math.max(10, Math.min(5000, Math.round(Number(next.maxItems) || DEFAULT_CONFIG.maxItems)));
     next.shortcut = String(next.shortcut || DEFAULT_CONFIG.shortcut);
+    next.display = String(next.display || DEFAULT_CONFIG.display);
     const shortcutChanged = next.shortcut !== state.config.shortcut;
+    const displayChanged = next.display !== state.config.display;
     state.config = next;
     if (shortcutChanged) {
       globalShortcut.unregisterAll();
       registerShortcut();
     }
+    // deferred: switching to fewer monitors destroys windows, and this reply may be going to one
+    if (displayChanged) setTimeout(refreshPanels, 0);
     saveConfig();
     enforceCap();
     saveStore();

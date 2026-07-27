@@ -50,6 +50,42 @@ function saveConfig() {
   try { saveJsonAtomic(CONFIG_FILE, state.config); } catch (err) { console.error('[clp] falha ao salvar config:', err); }
 }
 
+function sizeOf(file) {
+  try { return fs.statSync(file).size; } catch { return 0; }
+}
+
+function entries(dir) {
+  try { return fs.readdirSync(dir); } catch { return []; }
+}
+
+// disk usage of the store + the files no clip references anymore (crash, .tmp leftover, old bug)
+function scanUsage() {
+  const liveImages = new Set(state.store.clips.filter((c) => c.imageFile).map((c) => path.basename(c.imageFile)));
+  const liveThumbs = new Set(state.store.clips.map((c) => c.id + '.png'));
+  let bytes = sizeOf(HISTORY_FILE) + sizeOf(CONFIG_FILE);
+  let images = 0;
+  let orphanBytes = 0;
+  const orphans = [];
+  for (const [dir, live] of [[IMAGES_DIR, liveImages], [THUMBS_DIR, liveThumbs]]) {
+    for (const name of entries(dir)) {
+      const full = path.join(dir, name);
+      const size = sizeOf(full);
+      bytes += size;
+      if (dir === IMAGES_DIR) images++;
+      if (!live.has(name)) { orphans.push(full); orphanBytes += size; }
+    }
+  }
+  return { bytes, images, clips: state.store.clips.length, orphans, orphanBytes };
+}
+
+function pruneOrphans() {
+  const { orphans, orphanBytes } = scanUsage();
+  for (const file of orphans) {
+    try { fs.unlinkSync(file); } catch (err) { console.error('[clp] limpeza:', err.message); }
+  }
+  return { removed: orphans.length, bytes: orphanBytes };
+}
+
 function newId() {
   return Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
 }
@@ -58,4 +94,4 @@ function sha(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-module.exports = { loadStore, saveStore, saveDebounced, saveConfig, newId, sha };
+module.exports = { loadStore, saveStore, saveDebounced, saveConfig, scanUsage, pruneOrphans, newId, sha };

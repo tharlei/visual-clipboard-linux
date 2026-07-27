@@ -36,6 +36,7 @@ const ICONS = {
 const state = {
   clips: [],
   boards: [],
+  displays: [],
   caps: { xdotool: true },
   config: {},
   tab: 'all',
@@ -63,6 +64,10 @@ const shortcutCaptureBtn = $('#shortcutCapture');
 const setAutoPasteEl = $('#setAutoPaste');
 const setPasteDelayEl = $('#setPasteDelay');
 const setMaxItemsEl = $('#setMaxItems');
+const setDisplayEl = $('#setDisplay');
+const usageTextEl = $('#usageText');
+const orphanTextEl = $('#orphanText');
+const pruneBtn = $('#pruneBtn');
 
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
@@ -330,6 +335,34 @@ function fmtAccel(a) {
   return String(a).replace('Control', 'Ctrl').replace('Super', 'Meta');
 }
 
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return (n / 1024 ** i).toFixed(i ? 1 : 0) + ' ' + units[i];
+}
+
+async function refreshUsage() {
+  usageTextEl.textContent = '…';
+  const u = await window.clp.usage();
+  usageTextEl.textContent = `${fmtBytes(u.bytes)} — ${u.clips} clips, ${u.images} imagens`;
+  orphanTextEl.textContent = u.orphans
+    ? `Órfãos: ${u.orphans} arquivo(s), ${fmtBytes(u.orphanBytes)}`
+    : 'Órfãos: nenhum';
+  pruneBtn.disabled = !u.orphans;
+}
+
+function fillDisplays() {
+  const mode = (state.config || {}).display || 'cursor';
+  const opts = [
+    { id: 'cursor', label: 'Monitor do cursor' },
+    { id: 'all', label: 'Todos os monitores' },
+    ...state.displays,
+  ];
+  setDisplayEl.innerHTML = opts.map((o) =>
+    `<option value="${escapeHtml(o.id)}"${o.id === mode ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+}
+
 function openSettings() {
   const c = state.config || {};
   state.pendingShortcut = c.shortcut || 'Control+Alt+V';
@@ -339,7 +372,9 @@ function openSettings() {
   setAutoPasteEl.checked = c.autoPaste !== false;
   setPasteDelayEl.value = c.pasteDelayMs != null ? c.pasteDelayMs : 150;
   setMaxItemsEl.value = c.maxItems != null ? c.maxItems : 500;
+  fillDisplays();
   settingsEl.hidden = false;
+  refreshUsage();
 }
 
 function closeSettings() {
@@ -354,6 +389,7 @@ async function saveSettings() {
     autoPaste: setAutoPasteEl.checked,
     pasteDelayMs: Number(setPasteDelayEl.value),
     maxItems: Number(setMaxItemsEl.value),
+    display: setDisplayEl.value,
   });
   closeSettings();
 }
@@ -500,6 +536,10 @@ $('#boardCancel').addEventListener('click', closeBoardModal);
 $('#settingsBtn').addEventListener('click', openSettings);
 $('#settingsSave').addEventListener('click', saveSettings);
 $('#settingsCancel').addEventListener('click', closeSettings);
+pruneBtn.addEventListener('click', async () => {
+  await window.clp.prune();
+  refreshUsage();
+});
 shortcutCaptureBtn.addEventListener('click', () => {
   state.capturing = true;
   shortcutCaptureBtn.classList.add('capturing');
@@ -532,6 +572,7 @@ function applySnapshot(snap) {
   }
   for (const k of [...thumbPending]) if (!liveIds.has(k)) thumbPending.delete(k);
   state.boards = snap.boards;
+  state.displays = snap.displays || [];
   state.caps = snap.caps;
   state.config = snap.config;
   if (state.tab.startsWith('board:') && !snap.boards.some((b) => 'board:' + b.id === state.tab)) {

@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('clp', {
   assignBoard: (clipId, boardId, on) => ipcRenderer.invoke('boards:assign', clipId, boardId, on),
   deleteBoard: (id) => ipcRenderer.invoke('boards:delete', id),
   hide: () => ipcRenderer.invoke('panel:hide'),
+  usage: () => ipcRenderer.invoke('stats:usage'),
+  prune: () => ipcRenderer.invoke('stats:prune'),
   setConfig: (patch) => ipcRenderer.invoke('config:update', patch),
   startDrag: (id) => ipcRenderer.send('clips:startDrag', id),
   onChanged: (cb) => ipcRenderer.on('clips:changed', (_e, snap) => cb(snap)),

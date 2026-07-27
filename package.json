@@ -4,7 +4,8 @@
   "description": "Gerenciador de clipboard para Linux inspirado no Clp (clp.erick.page)",
   "main": "main.js",
   "scripts": {
-    "start": "electron --no-sandbox ."
+    "start": "electron --no-sandbox .",
+    "test": "node test/usage.test.js"
   },
   "license": "MIT",
   "devDependencies": {

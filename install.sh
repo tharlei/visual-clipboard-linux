@@ -65,6 +65,9 @@ if ! command -v xdotool >/dev/null 2>&1; then
 fi
 
 echo "Installing Visual Clipboard to $INSTALL_DIR ..."
+# an already-running instance holds the single-instance lock: the launch at the end of this
+# script would just toggle the OLD code's panel and quit, so an update looks like nothing happened
+pkill -f "$INSTALL_DIR" 2>/dev/null && sleep 1 || true
 mkdir -p "$INSTALL_DIR/renderer" "$INSTALL_DIR/assets" "$INSTALL_DIR/src" "$BIN_DIR" "$DESKTOP_DIR"
 cp "$SCRIPT_DIR"/main.js "$SCRIPT_DIR"/preload.js "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/
 cp "$SCRIPT_DIR"/src/*.js "$INSTALL_DIR"/src/

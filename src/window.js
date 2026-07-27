@@ -10,14 +10,30 @@ const state = require('./state');
 
 let shownAt = 0;
 
-function positionWindow() {
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const { x, y, width, height } = display.workArea;
-  state.win.setBounds({ x, y: y + height - PANEL_HEIGHT, width, height: PANEL_HEIGHT });
+function panels() {
+  state.wins = state.wins.filter((w) => !w.isDestroyed());
+  return state.wins;
 }
 
-function createWindow() {
-  const win = state.win = new BrowserWindow({
+// 'cursor' → display under the pointer, 'all' → every display, anything else → a pinned display id
+function targetDisplays() {
+  const all = screen.getAllDisplays();
+  const mode = state.config.display || 'cursor';
+  if (mode === 'all') return all;
+  if (mode === 'cursor') return [screen.getDisplayNearestPoint(screen.getCursorScreenPoint())];
+  return [all.find((d) => String(d.id) === String(mode)) || screen.getPrimaryDisplay()];
+}
+
+function displayList() {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d, i) => ({
+    id: String(d.id),
+    label: `Monitor ${i + 1} — ${d.size.width}×${d.size.height}${d.id === primary ? ' (principal)' : ''}`,
+  }));
+}
+
+function createPanel() {
+  const win = new BrowserWindow({
     frame: false,
     transparent: true,
     resizable: false,
@@ -42,7 +58,9 @@ function createWindow() {
     // ignore the focus-steal that fires right after showing (menu/overview closing) — else a
     // launch-shown panel hides instantly and looks like it never opened
     if (Date.now() - shownAt < 600) return;
-    win.hide();
+    // with one panel per monitor, clicking another panel blurs this one — only hide the
+    // whole set once no panel holds the focus
+    setTimeout(() => { if (!panels().some((w) => w.isFocused())) hidePanel(); }, 80);
   });
   win.on('close', (e) => { e.preventDefault(); win.hide(); });
   win.webContents.on('render-process-gone', (_e, details) => {
@@ -53,27 +71,54 @@ function createWindow() {
   });
   // covers every hide path (blur, close, Escape, select) — renderer purges its DOM on this
   win.on('hide', () => win.webContents.send('panel:hidden'));
+  return win;
+}
+
+function syncPanels() {
+  const need = targetDisplays().length;
+  const wins = panels();
+  while (wins.length > need) wins.pop().destroy();
+  while (wins.length < need) wins.push(createPanel());
+  return wins;
+}
+
+function refreshPanels() {
+  const wasVisible = panels().some((w) => w.isVisible());
+  syncPanels();
+  if (wasVisible) showPanel(false);
+}
+
+function createWindow() {
+  syncPanels();
+  const onDisplays = () => { if ((state.config.display || 'cursor') === 'all') refreshPanels(); };
+  screen.on('display-added', onDisplays);
+  screen.on('display-removed', onDisplays);
 }
 
 function showPanel(activate = true) {
-  positionWindow();
+  const displays = targetDisplays();
+  const wins = syncPanels();
   shownAt = Date.now();
   // the poll skips unchanged image targets to avoid Chromium's per-read retention, so
   // force one fresh read now — the history must be current when the user looks at it
   state.imageDue = true;
   if (state.pollNow) state.pollNow();
+  wins.forEach((win, i) => {
+    const { x, y, width, height } = (displays[i] || displays[0]).workArea;
+    win.setBounds({ x, y: y + height - PANEL_HEIGHT, width, height: PANEL_HEIGHT });
+    // show every panel without focus first: focusing them in turn would blur the previous one
+    win.showInactive();
+    win.webContents.send('panel:shown');
+  });
   if (activate) {
-    state.win.show();
-    state.win.focus();
-  } else {
-    // launch auto-show: show on top WITHOUT grabbing focus, so the launch/overview
-    // focus churn never fires a blur that would hide it instantly
-    state.win.showInactive();
+    const cursorId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id;
+    const win = wins[Math.max(0, displays.findIndex((d) => d.id === cursorId))];
+    win.show();
+    win.focus();
   }
-  state.win.webContents.send('panel:shown');
   if (DEBUG) {
     setTimeout(() => {
-      state.win.webContents.capturePage().then((img) => {
+      wins[0].webContents.capturePage().then((img) => {
         fs.writeFileSync(path.join(os.tmpdir(), 'clp-panel.png'), img.toPNG());
         console.log('[clp] debug screenshot: ' + path.join(os.tmpdir(), 'clp-panel.png'));
       }).catch(() => {});
@@ -82,12 +127,16 @@ function showPanel(activate = true) {
 }
 
 function hidePanel() {
-  if (state.win && state.win.isVisible()) state.win.hide();
+  for (const win of panels()) if (win.isVisible()) win.hide();
 }
 
 function togglePanel() {
-  if (state.win.isVisible()) hidePanel();
+  if (panels().some((w) => w.isVisible())) hidePanel();
   else showPanel();
+}
+
+function sendAll(channel, payload) {
+  for (const win of panels()) win.webContents.send(channel, payload);
 }
 
 function snapshot() {
@@ -105,19 +154,21 @@ function snapshot() {
       h: c.h,
     })),
     boards: state.store.boards,
-    visible: !!(state.win && state.win.isVisible()),
+    visible: panels().some((w) => w.isVisible()),
     config: {
       shortcut: state.config.shortcut,
       autoPaste: state.config.autoPaste,
       pasteDelayMs: state.config.pasteDelayMs,
       maxItems: state.config.maxItems,
+      display: state.config.display,
     },
+    displays: displayList(),
     caps: { xdotool: state.hasXdotool },
   };
 }
 
 function broadcast() {
-  if (state.win && !state.win.isDestroyed()) state.win.webContents.send('clips:changed', snapshot());
+  sendAll('clips:changed', snapshot());
 }
 
 function registerShortcut() {
@@ -132,4 +183,7 @@ function registerShortcut() {
   }
 }
 
-module.exports = { createWindow, showPanel, hidePanel, togglePanel, snapshot, broadcast, registerShortcut };
+module.exports = {
+  createWindow, showPanel, hidePanel, togglePanel, refreshPanels,
+  panels, sendAll, snapshot, broadcast, registerShortcut,
+};

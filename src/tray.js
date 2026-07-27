@@ -7,7 +7,7 @@ const path = require('node:path');
 const { AUTOSTART_FILE } = require('./constants');
 const state = require('./state');
 const { clearHistory } = require('./clipboard');
-const { showPanel, togglePanel } = require('./window');
+const { showPanel, togglePanel, sendAll } = require('./window');
 
 const ICON_FILE = path.join(__dirname, '..', 'assets', 'icon.png');
 
@@ -44,7 +44,7 @@ function updateTrayMenu() {
   if (!state.tray) return;
   state.tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Abrir (${state.config.shortcut.replace('Control', 'Ctrl')})`, click: () => showPanel() },
-    { label: 'Configurações…', click: () => { showPanel(); state.win.webContents.send('settings:open'); } },
+    { label: 'Configurações…', click: () => { showPanel(); sendAll('settings:open'); } },
     { label: 'Limpar histórico', click: () => { clearHistory(); } },
     // ponytail: toggle off the filesystem, not item.checked — AppIndicator (Linux tray) doesn't
     // flip a checkbox's state on click, so item.checked reports the old value and nothing happens.

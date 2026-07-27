@@ -31,6 +31,7 @@ const DEFAULT_CONFIG = {
   maxItems: 500,
   autoPaste: true,
   pasteDelayMs: 150,
+  display: 'cursor',
 };
 
 const DEBUG = !!process.env.CLP_DEBUG;

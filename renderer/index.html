@@ -55,6 +55,18 @@
             <span>Máximo de itens no histórico</span>
             <input type="number" id="setMaxItems" min="10" max="5000" step="10" />
           </div>
+          <div class="settings__row">
+            <span>Onde abrir o painel</span>
+            <select id="setDisplay"></select>
+          </div>
+          <div class="settings__row">
+            <span>Espaço usado</span>
+            <span class="settings__value" id="usageText">…</span>
+          </div>
+          <div class="settings__row">
+            <span class="settings__value" id="orphanText">Arquivos órfãos</span>
+            <button type="button" class="btn btn--ghost" id="pruneBtn">Limpar órfãos</button>
+          </div>
           <div class="editor__actions">
             <button class="btn btn--ghost" id="settingsCancel">Cancelar</button>
             <button class="btn btn--ghost btn--accent" id="settingsSave">Salvar</button>
