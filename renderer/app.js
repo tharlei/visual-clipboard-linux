@@ -65,9 +65,14 @@ const setAutoPasteEl = $('#setAutoPaste');
 const setPasteDelayEl = $('#setPasteDelay');
 const setMaxItemsEl = $('#setMaxItems');
 const setDisplayEl = $('#setDisplay');
+const pausedChipEl = $('#pausedChip');
 const usageTextEl = $('#usageText');
 const orphanTextEl = $('#orphanText');
 const pruneBtn = $('#pruneBtn');
+const clearBtn = $('#clearBtn');
+const setAutostartEl = $('#setAutostart');
+const staleRowEl = $('#staleRow');
+const staleTextEl = $('#staleText');
 
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
@@ -350,6 +355,10 @@ async function refreshUsage() {
     ? `Órfãos: ${u.orphans} arquivo(s), ${fmtBytes(u.orphanBytes)}`
     : 'Órfãos: nenhum';
   pruneBtn.disabled = !u.orphans;
+  staleRowEl.hidden = !u.electronStale;
+  if (u.electronStale) {
+    staleTextEl.textContent = `⚠ Chromium sem atualizar há ${u.electronStale} dias — rode npm install electron@latest && ./install.sh`;
+  }
 }
 
 function fillDisplays() {
@@ -374,7 +383,14 @@ function openSettings() {
   setMaxItemsEl.value = c.maxItems != null ? c.maxItems : 500;
   fillDisplays();
   settingsEl.hidden = false;
+  resetClearBtn();
   refreshUsage();
+  window.clp.autostart().then((on) => { setAutostartEl.checked = on; });
+}
+
+function resetClearBtn() {
+  clearBtn.dataset.armed = '';
+  clearBtn.textContent = 'Limpar histórico';
 }
 
 function closeSettings() {
@@ -391,6 +407,7 @@ async function saveSettings() {
     maxItems: Number(setMaxItemsEl.value),
     display: setDisplayEl.value,
   });
+  await window.clp.autostart(setAutostartEl.checked);
   closeSettings();
 }
 
@@ -540,6 +557,16 @@ pruneBtn.addEventListener('click', async () => {
   await window.clp.prune();
   refreshUsage();
 });
+clearBtn.addEventListener('click', async () => {
+  if (!clearBtn.dataset.armed) {
+    clearBtn.dataset.armed = '1';
+    clearBtn.textContent = 'Confirmar: apagar tudo';
+    return;
+  }
+  await window.clp.clear();
+  resetClearBtn();
+  refreshUsage();
+});
 shortcutCaptureBtn.addEventListener('click', () => {
   state.capturing = true;
   shortcutCaptureBtn.classList.add('capturing');
@@ -579,6 +606,7 @@ function applySnapshot(snap) {
     state.tab = 'all';
   }
   $('#shortcutHint').textContent = snap.config.shortcut.replace('Control', 'Ctrl');
+  pausedChipEl.hidden = !snap.config.paused;
   let hint = document.querySelector('.hint');
   if (!snap.caps.xdotool && !hint) {
     hint = document.createElement('div');
@@ -592,7 +620,6 @@ function applySnapshot(snap) {
 }
 
 window.clp.onChanged(applySnapshot);
-window.clp.onSettings(() => openSettings());
 
 window.clp.onHidden(() => {
   panelVisible = false;
@@ -615,6 +642,7 @@ window.clp.onShown(() => {
   cardsEl.scrollLeft = 0;
   searchEl.focus();
   render();
+  window.clp.get().then(applySnapshot);
 });
 
 setInterval(() => {

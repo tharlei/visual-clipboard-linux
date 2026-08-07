@@ -46,7 +46,7 @@ function resolveThumb(id) {
     // tmp + rename, like saveJsonAtomic: a truncated thumb would be cached forever
     const tmp = thumb + '.tmp';
     const small = img.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) });
-    fs.writeFileSync(tmp, small.toPNG());
+    fs.writeFileSync(tmp, small.toPNG(), { mode: 0o600 });
     fs.renameSync(tmp, thumb);
     return thumb;
   } catch {

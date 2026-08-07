@@ -4,8 +4,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { IMAGES_DIR, THUMBS_DIR, HISTORY_FILE, CONFIG_FILE, DEFAULT_CONFIG } = require('./constants');
+const { DATA_DIR, IMAGES_DIR, THUMBS_DIR, HISTORY_FILE, CONFIG_FILE, DEFAULT_CONFIG } = require('./constants');
 const state = require('./state');
+const { normalizeConfig, sanitizeStore } = require('./validate');
 
 let saveTimer = null;
 
@@ -21,17 +22,37 @@ function loadJson(file, fallback) {
   }
 }
 
+// installs from before the umask shipped left history.json at 0644 (0664 under a 002 umask)
+function hardenPerms() {
+  for (const dir of [DATA_DIR, IMAGES_DIR, THUMBS_DIR]) {
+    try { fs.chmodSync(dir, 0o700); } catch {}
+  }
+  for (const file of [HISTORY_FILE, CONFIG_FILE]) {
+    try { if (fs.existsSync(file)) fs.chmodSync(file, 0o600); } catch {}
+  }
+  for (const dir of [IMAGES_DIR, THUMBS_DIR]) {
+    for (const name of entries(dir)) {
+      try { fs.chmodSync(path.join(dir, name), 0o600); } catch {}
+    }
+  }
+}
+
 function loadStore() {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
   fs.mkdirSync(THUMBS_DIR, { recursive: true });
-  state.store = loadJson(HISTORY_FILE, { version: 1, boards: [], clips: [] });
-  state.config = loadJson(CONFIG_FILE, DEFAULT_CONFIG);
+  hardenPerms();
+  // history.json and config.json are untrusted input: they sit on disk, older installs left
+  // them group-writable, and their fields feed path.join() and the renderer's markup
+  state.store = sanitizeStore(loadJson(HISTORY_FILE, { version: 1, boards: [], clips: [] }));
+  state.config = normalizeConfig(loadJson(CONFIG_FILE, DEFAULT_CONFIG), DEFAULT_CONFIG);
   if (!fs.existsSync(CONFIG_FILE)) saveJsonAtomic(CONFIG_FILE, state.config);
 }
 
+// mode is belt to the umask's braces: it only applies on create, and the tmp is always new.
+// without it the 0600 guarantee would rest solely on main.js being the entry point.
 function saveJsonAtomic(file, data) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 1));
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 1), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -44,6 +65,10 @@ function saveStore() {
 function saveDebounced() {
   if (saveTimer) return;
   saveTimer = setTimeout(saveStore, 300);
+}
+
+function flushSave() {
+  if (saveTimer) saveStore();
 }
 
 function saveConfig() {
@@ -94,4 +119,4 @@ function sha(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-module.exports = { loadStore, saveStore, saveDebounced, saveConfig, scanUsage, pruneOrphans, newId, sha };
+module.exports = { loadStore, saveStore, saveDebounced, flushSave, saveConfig, scanUsage, pruneOrphans, newId, sha };

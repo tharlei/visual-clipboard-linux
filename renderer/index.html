@@ -21,6 +21,7 @@
           <kbd id="shortcutHint">Ctrl+Alt+V</kbd>
         </label>
         <div class="shelf__tabs" id="tabs"></div>
+        <span class="glass-chip shelf__paused" id="pausedChip" title="Reative na bandeja do sistema" hidden>⏸ Captura pausada</span>
         <span class="glass-chip glass-chip--circle" id="settingsBtn" role="button" title="Configurações">⚙</span>
       </div>
 
@@ -60,12 +61,23 @@
             <select id="setDisplay"></select>
           </div>
           <div class="settings__row">
+            <span>Iniciar com o sistema</span>
+            <input type="checkbox" id="setAutostart" />
+          </div>
+          <div class="settings__row">
             <span>Espaço usado</span>
             <span class="settings__value" id="usageText">…</span>
           </div>
           <div class="settings__row">
             <span class="settings__value" id="orphanText">Arquivos órfãos</span>
             <button type="button" class="btn btn--ghost" id="pruneBtn">Limpar órfãos</button>
+          </div>
+          <div class="settings__row">
+            <span class="settings__value">Apagar todo o histórico</span>
+            <button type="button" class="btn btn--ghost" id="clearBtn">Limpar histórico</button>
+          </div>
+          <div class="settings__row settings__row--warn" id="staleRow" hidden>
+            <span class="settings__value" id="staleText"></span>
           </div>
           <div class="editor__actions">
             <button class="btn btn--ghost" id="settingsCancel">Cancelar</button>

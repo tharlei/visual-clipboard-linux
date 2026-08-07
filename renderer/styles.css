@@ -697,6 +697,11 @@ kbd {
   color: var(--ink);
 }
 
+.settings__row--warn .settings__value {
+  color: #FF9F0A;
+  line-height: 1.35;
+}
+
 .settings__row input[type="number"] {
   width: 6rem;
   border: 0.5px solid var(--glass-border-soft);
@@ -769,6 +774,19 @@ kbd {
 #shortcutCapture.capturing {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.shelf__paused {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--accent-warn, #FF9F0A);
+  border-color: currentColor;
+  white-space: nowrap;
+}
+
+/* .glass-chip sets display:inline-flex, which outranks the UA rule for [hidden] */
+.shelf__paused[hidden] {
+  display: none;
 }
 
 /* xdotool hint */

@@ -8,11 +8,12 @@ const { fileURLToPath, pathToFileURL } = require('node:url');
 
 const {
   DATA_DIR, THUMBS_DIR, MAX_IMAGE_BYTES, MAX_TEXT_CHARS,
-  GNOME_FILES_FORMAT, VIDEO_EXTS, IMAGE_EXTS, DEBUG,
+  GNOME_FILES_FORMAT, SECRET_HINT_FORMATS, VIDEO_EXTS, IMAGE_EXTS, DEBUG,
 } = require('./constants');
 const state = require('./state');
 const { saveStore, saveDebounced, newId, sha } = require('./storage');
 const { broadcast, hidePanel } = require('./window');
+const { matchesIgnore } = require('./validate');
 
 let imgGate = { len: -1, head: null, sig: null };
 let lastFmtKey = null;
@@ -56,7 +57,7 @@ function readClipboard() {
     state.imageDue = true;
   }
 
-  if (formats.includes('x-kde-passwordManagerHint')) {
+  if (formats.some((f) => SECRET_HINT_FORMATS.has(f))) {
     return { sig: 'secret:' + sha(clipboard.readText() || ''), skip: true };
   }
 
@@ -95,6 +96,7 @@ function readClipboard() {
   const text = clipboard.readText();
   if (!text || !text.trim()) return { sig: null };
   if (text.length > MAX_TEXT_CHARS) return { sig: 'T:big:' + text.length, skip: true };
+  if (matchesIgnore(text, state.config.ignorePatterns)) return { sig: 'ign:' + sha(text), skip: true };
   return { sig: 'T:' + sha(text), kind: 'text', text };
 }
 
@@ -112,6 +114,9 @@ function classifyText(text) {
 // ---------- capture ----------
 
 function poll() {
+  // paused: read nothing at all. setPaused() reseeds lastSig on resume so whatever was
+  // copied during the pause is not swept up by the first poll after it.
+  if (state.config.paused) return;
   let r;
   pollCount++;
   try { r = readClipboard(); } catch (err) { console.error('[clp] poll:', err); return; }
@@ -161,7 +166,7 @@ function capture(r) {
     clip.w = size.width;
     clip.h = size.height;
     try {
-      fs.writeFileSync(path.join(DATA_DIR, clip.imageFile), r.png);
+      fs.writeFileSync(path.join(DATA_DIR, clip.imageFile), r.png, { mode: 0o600 });
     } catch (err) {
       console.error('[clp] falha ao gravar imagem:', err);
       return;

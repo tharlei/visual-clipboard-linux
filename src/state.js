@@ -9,6 +9,7 @@ module.exports = {
   wins: [],
   tray: null,
   config: { ...DEFAULT_CONFIG },
+  activeShortcut: null,
   store: { version: 1, boards: [], clips: [] },
   lastSig: undefined,
   hasXdotool: false,

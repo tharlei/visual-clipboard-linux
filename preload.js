@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('clp', {
   usage: () => ipcRenderer.invoke('stats:usage'),
   prune: () => ipcRenderer.invoke('stats:prune'),
   setConfig: (patch) => ipcRenderer.invoke('config:update', patch),
+  autostart: (on) => ipcRenderer.invoke('config:autostart', on),
   startDrag: (id) => ipcRenderer.send('clips:startDrag', id),
   onChanged: (cb) => ipcRenderer.on('clips:changed', (_e, snap) => cb(snap)),
   onShown: (cb) => ipcRenderer.on('panel:shown', () => cb()),
@@ -25,5 +26,4 @@ contextBridge.exposeInMainWorld('clp', {
   // called by the renderer AFTER it drops the cards, so the decoded bitmaps are
   // already unreferenced when Chromium's image cache is flushed
   purgeCache: () => { if (webFrame && typeof webFrame.clearCache === 'function') webFrame.clearCache(); },
-  onSettings: (cb) => ipcRenderer.on('settings:open', () => cb()),
 });

@@ -1,30 +1,55 @@
 'use strict';
 
-const { ipcMain, globalShortcut, nativeImage, shell } = require('electron');
+const { ipcMain, dialog, nativeImage, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { DATA_DIR, BOARD_COLORS, DEFAULT_CONFIG } = require('./constants');
+const { DATA_DIR, BOARD_COLORS, MAX_TEXT_CHARS, ELECTRON_STALE_DAYS } = require('./constants');
 const state = require('./state');
 const { saveStore, saveDebounced, saveConfig, scanUsage, pruneOrphans, newId, sha } = require('./storage');
 const {
   classifyText, deleteImageFile, enforceCap,
   writeClipToClipboard, selectClip, clearHistory,
 } = require('./clipboard');
-const { snapshot, broadcast, hidePanel, refreshPanels, registerShortcut } = require('./window');
-const { trayIcon, updateTrayMenu } = require('./tray');
+const { snapshot, broadcast, hidePanel, refreshPanels, registerShortcut, panels } = require('./window');
+const { trayIcon, updateTrayMenu, isAutostart, setAutostart, electronAgeDays } = require('./tray');
+const { normalizeConfig, riskyToOpen } = require('./validate');
+
+// first bytes only — a file clip can point at a multi-gigabyte video
+function readHead(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(64);
+    const n = fs.readSync(fd, buf, 0, 64, 0);
+    return buf.subarray(0, n).toString('latin1');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+  }
+}
 
 function setupIpc() {
-  ipcMain.handle('clips:get', () => snapshot());
-  ipcMain.handle('clips:getText', (_e, id) => {
+  // every channel below is privileged; only the panel windows may reach it. wrapping the
+  // registration instead of each handler keeps future channels covered by default.
+  const fromPanel = (e) => panels().some((w) => w.webContents === e.sender);
+  const handle = (ch, fn) => ipcMain.handle(ch, (e, ...a) => {
+    if (!fromPanel(e)) throw new Error(`${ch}: sender não é um painel`);
+    return fn(e, ...a);
+  });
+  const on = (ch, fn) => ipcMain.on(ch, (e, ...a) => { if (fromPanel(e)) fn(e, ...a); });
+
+  handle('clips:get', () => snapshot());
+  handle('clips:getText', (_e, id) => {
     const clip = state.store.clips.find((c) => c.id === id);
     return clip ? clip.text : '';
   });
-  ipcMain.handle('clips:select', (_e, id) => selectClip(id));
-  ipcMain.handle('clips:update', (_e, id, text) => {
+  handle('clips:select', (_e, id) => selectClip(id));
+  handle('clips:update', (_e, id, text) => {
     const clip = state.store.clips.find((c) => c.id === id);
     if (!clip || clip.type === 'image' || clip.type === 'file') return;
-    clip.text = String(text);
+    clip.text = String(text).slice(0, MAX_TEXT_CHARS);
     clip.type = classifyText(clip.text);
     clip.hash = 'T:' + sha(clip.text);
     clip.createdAt = Date.now();
@@ -34,7 +59,7 @@ function setupIpc() {
     saveDebounced();
     broadcast();
   });
-  ipcMain.handle('clips:delete', (_e, id) => {
+  handle('clips:delete', (_e, id) => {
     const i = state.store.clips.findIndex((c) => c.id === id);
     if (i < 0) return;
     deleteImageFile(state.store.clips[i]);
@@ -42,19 +67,37 @@ function setupIpc() {
     saveDebounced();
     broadcast();
   });
-  ipcMain.handle('clips:clear', () => clearHistory());
-  ipcMain.handle('clips:pin', (_e, id, value) => {
+  handle('clips:clear', () => clearHistory());
+  handle('clips:pin', (_e, id, value) => {
     const clip = state.store.clips.find((c) => c.id === id);
     if (!clip) return;
     clip.pinned = !!value;
     saveDebounced();
     broadcast();
   });
-  ipcMain.handle('clips:openFile', (_e, id) => {
+  // the path came off the clipboard, so any process on the box chose it. a .desktop or an
+  // executable handed to shell.openPath() is code execution — ask before that one.
+  handle('clips:openFile', async (_e, id) => {
     const clip = state.store.clips.find((c) => c.id === id);
-    if (clip && clip.files && clip.files[0]) shell.openPath(clip.files[0]);
+    const file = clip && clip.files && clip.files[0];
+    if (!file) return;
+    let stat;
+    try { stat = fs.statSync(file); } catch { return; }
+    if (riskyToOpen(file, stat, readHead(file))) {
+      const { response } = await dialog.showMessageBox(panels()[0], {
+        type: 'warning',
+        buttons: ['Cancelar', 'Abrir mesmo assim'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        message: 'Este arquivo pode executar código',
+        detail: `${file}\n\nQualquer aplicativo pode ter colocado este caminho na área de transferência. Só abra se você reconhece o arquivo.`,
+      });
+      if (response !== 1) return;
+    }
+    shell.openPath(file);
   });
-  ipcMain.handle('boards:create', (_e, name) => {
+  handle('boards:create', (_e, name) => {
     const board = {
       id: 'b_' + newId(),
       name: String(name || '').trim().slice(0, 40) || 'Board',
@@ -65,15 +108,15 @@ function setupIpc() {
     broadcast();
     return board;
   });
-  ipcMain.handle('boards:assign', (_e, clipId, boardId, on) => {
+  handle('boards:assign', (_e, clipId, boardId, enabled) => {
     const clip = state.store.clips.find((c) => c.id === clipId);
     if (!clip || !state.store.boards.some((b) => b.id === boardId)) return;
     clip.boardIds = clip.boardIds.filter((b) => b !== boardId);
-    if (on) clip.boardIds.push(boardId);
+    if (enabled) clip.boardIds.push(boardId);
     saveDebounced();
     broadcast();
   });
-  ipcMain.handle('boards:delete', (_e, id) => {
+  handle('boards:delete', (_e, id) => {
     state.store.boards = state.store.boards.filter((b) => b.id !== id);
     for (const c of state.store.clips) {
       if (c.boardIds && c.boardIds.length) c.boardIds = c.boardIds.filter((b) => b !== id);
@@ -81,26 +124,30 @@ function setupIpc() {
     saveDebounced();
     broadcast();
   });
-  ipcMain.handle('panel:hide', () => hidePanel());
-  ipcMain.handle('stats:usage', () => {
+  handle('panel:hide', () => hidePanel());
+  handle('stats:usage', () => {
     const u = scanUsage();
-    return { bytes: u.bytes, images: u.images, clips: u.clips, orphans: u.orphans.length, orphanBytes: u.orphanBytes };
+    const age = electronAgeDays();
+    return {
+      bytes: u.bytes, images: u.images, clips: u.clips,
+      orphans: u.orphans.length, orphanBytes: u.orphanBytes,
+      electronStale: age >= ELECTRON_STALE_DAYS ? age : 0,
+    };
   });
-  ipcMain.handle('stats:prune', () => pruneOrphans());
-  ipcMain.handle('config:update', (_e, patch) => {
-    const next = { ...state.config, ...(patch || {}) };
-    next.autoPaste = !!next.autoPaste;
-    next.pasteDelayMs = Math.max(0, Math.min(2000, Number(next.pasteDelayMs) || 0));
-    next.maxItems = Math.max(10, Math.min(5000, Math.round(Number(next.maxItems) || DEFAULT_CONFIG.maxItems)));
-    next.shortcut = String(next.shortcut || DEFAULT_CONFIG.shortcut);
-    next.display = String(next.display || DEFAULT_CONFIG.display);
+  handle('stats:prune', () => pruneOrphans());
+  handle('config:autostart', (_e, on) => {
+    if (typeof on === 'boolean') setAutostart(on);
+    return isAutostart();
+  });
+  handle('config:update', (_e, patch) => {
+    // normalizeConfig rejects an accelerator with no modifier: a bare key registered here
+    // would swallow that key for every app on the desktop. it also keeps the current value
+    // on anything invalid, so a bad patch is a no-op rather than a reset.
+    const next = normalizeConfig({ ...state.config, ...(patch || {}) }, state.config);
     const shortcutChanged = next.shortcut !== state.config.shortcut;
     const displayChanged = next.display !== state.config.display;
     state.config = next;
-    if (shortcutChanged) {
-      globalShortcut.unregisterAll();
-      registerShortcut();
-    }
+    if (shortcutChanged) registerShortcut();
     // deferred: switching to fewer monitors destroys windows, and this reply may be going to one
     if (displayChanged) setTimeout(refreshPanels, 0);
     saveConfig();
@@ -111,7 +158,7 @@ function setupIpc() {
     return { shortcut: state.config.shortcut };
   });
   // drag a real file out (image/file clips) — dropping into a terminal yields the path
-  ipcMain.on('clips:startDrag', (e, id) => {
+  on('clips:startDrag', (e, id) => {
     const clip = state.store.clips.find((c) => c.id === id);
     if (!clip) return;
     let file;
