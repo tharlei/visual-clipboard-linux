@@ -74,6 +74,29 @@ Edit the file and restart, or just use the ⚙ **Settings** panel in-app (applie
 { "ignorePatterns": ["BEGIN RSA PRIVATE KEY", "ghp_", "AKIA"] }
 ```
 
+### When it stops working
+
+**Restarting.** Tray → *Reiniciar*, or ⚙ **Configurações** → *Reiniciar*. It saves the history, kills any app process left over from an earlier session (that leftover is what still holds the tray icon and the global shortcut), and comes back clean. The tray path keeps working when the panel is the thing that broke.
+
+**It comes back on its own.** The launcher supervises the process: an unexpected exit is respawned after 2s, capped at 5 crashes in 5 minutes so it can't loop. Quitting from the menu does not respawn. This exists because the app used to die by itself — `FATAL ... GPU process isn't usable. Goodbye.` — leaving nothing alive for a button inside it to restart.
+
+**The log says what happened.** `~/.local/share/visual-clipboard/launch.log` (rotates at 2 MB into `launch.log.1`). One line a minute:
+
+```
+2026-08-12 09:49:12.634 INFO [clp] hb up=1min ocioso=0s clips=1 poll=+119 lento=53ms err=0
+  paineis=1/0 atalho=Control+Alt+V:ok Browser=162MB Tab=98MB
+```
+
+`poll=+119` is healthy (one read every 500ms). Reading it:
+
+| In the log | What it was |
+| --- | --- |
+| `hb` lines stop | main process wedged — likely the synchronous clipboard read stuck on a dead X11 selection owner |
+| `hb` continues, `poll=+3` | blocked for part of the minute; `lento=` gives the worst single read |
+| `atalho=…:PERDIDO` | the X11 grab was lost (suspend, VT switch); the app re-registers it and logs that |
+| `child-gone tipo=GPU` | the GPU process died; if it takes the app with it the supervisor restarts — that process stays separate and sandboxed on purpose |
+| ends at a `FATAL` | it died; the `supervisor:` line right below shows the respawn |
+
 ## Security & privacy
 
 Runs entirely on your machine. There's no server, no telemetry, no account, no network calls — nothing is monitored or sent anywhere. Your clipboard history never leaves `~/.local/share/visual-clipboard/`.

@@ -86,6 +86,10 @@ function createPanel() {
     win.hide();
     win.webContents.reload();
   });
+  // a panel that stops answering is the visible half of "travou" — the pair of lines tells a
+  // renderer stuck on a big paint apart from a main process that stopped scheduling anything
+  win.on('unresponsive', () => console.error('[clp] painel não responde'));
+  win.on('responsive', () => console.log('[clp] painel voltou a responder'));
   // covers every hide path (blur, close, Escape, select) — renderer purges its DOM on this
   win.on('hide', () => win.webContents.send('panel:hidden'));
   return win;

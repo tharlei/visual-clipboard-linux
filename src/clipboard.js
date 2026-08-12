@@ -8,7 +8,7 @@ const { fileURLToPath, pathToFileURL } = require('node:url');
 
 const {
   DATA_DIR, THUMBS_DIR, MAX_IMAGE_BYTES, MAX_TEXT_CHARS,
-  GNOME_FILES_FORMAT, SECRET_HINT_FORMATS, VIDEO_EXTS, IMAGE_EXTS, DEBUG,
+  GNOME_FILES_FORMAT, SECRET_HINT_FORMATS, VIDEO_EXTS, IMAGE_EXTS, POLL_SLOW_MS, DEBUG,
 } = require('./constants');
 const state = require('./state');
 const { saveStore, saveDebounced, newId, sha } = require('./storage');
@@ -17,7 +17,6 @@ const { matchesIgnore } = require('./validate');
 
 let imgGate = { len: -1, head: null, sig: null };
 let lastFmtKey = null;
-let pollCount = 0;
 
 // ---------- reading ----------
 
@@ -118,9 +117,25 @@ function poll() {
   // copied during the pause is not swept up by the first poll after it.
   if (state.config.paused) return;
   let r;
-  pollCount++;
-  try { r = readClipboard(); } catch (err) { console.error('[clp] poll:', err); return; }
-  if (DEBUG && pollCount % 10 === 0) console.log(`[clp] poll#${pollCount} sig=${r.sig && r.sig.slice(0, 16)}`);
+  state.pollCount++;
+  const t0 = Date.now();
+  try {
+    r = readClipboard();
+  } catch (err) {
+    state.pollErrors++;
+    console.error('[clp] poll:', err);
+    return;
+  } finally {
+    const ms = Date.now() - t0;
+    if (ms > state.pollMaxMs) state.pollMaxMs = ms;
+    // the kind is what makes this actionable: an image read stalls on the X11 selection
+    // transfer, a text one does not, and the two want different fixes. No kind means the image
+    // read was gated off (imageDue false), so the stall was in reading the format list itself.
+    if (ms > POLL_SLOW_MS) {
+      console.warn(`[clp] poll lento ${ms}ms tipo=${(r && r.kind) || 'nenhum'} — main travado nesse intervalo`);
+    }
+  }
+  if (DEBUG && state.pollCount % 10 === 0) console.log(`[clp] poll#${state.pollCount} sig=${r.sig && r.sig.slice(0, 16)}`);
   if (r.sig === state.lastSig) return;
   state.lastSig = r.sig;
   if (!r.sig || r.skip) return;

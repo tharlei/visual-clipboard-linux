@@ -12,6 +12,27 @@ BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
 CONFIG_JSON="$HOME/.local/share/$APP_NAME/config.json"
 
+# The launcher supervises the app and respawns it on any unexpected exit, so a bare pkill now
+# means "restart it", not "stop it" — an update would race the copy and an uninstall would keep
+# reviving a deleted binary. This flag is how a deliberate stop says which one it is. Written
+# only when the data dir already exists: creating it here would land 0755 instead of the app's
+# own 0700, and there is nothing running to stop before the first install anyway.
+# `pkill -f` matches the WHOLE command line, so a bare "$INSTALL_DIR" also hits every shell,
+# editor and pgrep that merely names the path in an argument — including the shell running this
+# script, which is how the -9 below once killed the installer mid-run. Anchoring with ^ pins the
+# match to argv[0], i.e. only processes actually RUNNING the app's own binary. Matching the dir
+# rather than the process name stays deliberate: an unpackaged Electron app is just "electron".
+APP_PROC="^$INSTALL_DIR/node_modules/electron/dist/electron"
+stop_running() {
+  [ -d "$HOME/.local/share/$APP_NAME" ] && : > "$HOME/.local/share/$APP_NAME/quitting" 2>/dev/null || true
+  pkill -f "$APP_PROC" 2>/dev/null && sleep 2 || true
+  # SIGTERM is a request, and a wedged instance cannot honour it: one was caught spinning at
+  # 100% CPU for two minutes after being asked to quit, still holding the tray icon and the
+  # global shortcut while its replacement was already running. Whatever ignored the polite
+  # signal is exactly what must not survive into the new install.
+  pkill -9 -f "$APP_PROC" 2>/dev/null && sleep 1 || true
+}
+
 uninstall() {
   # Ask before touching clip history — it's the only thing here that isn't re-creatable
   # by re-running this script. Non-interactive (curl | bash) keeps the data.
@@ -27,8 +48,7 @@ uninstall() {
   fi
 
   echo "Removing Visual Clipboard..."
-  # match on the app dir, not the process name: an unpackaged Electron app is just "electron"
-  pkill -f "$INSTALL_DIR" 2>/dev/null || true
+  stop_running
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_DIR/$APP_NAME"
   rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
@@ -38,6 +58,7 @@ uninstall() {
     rm -rf "$HOME/.local/share/$APP_NAME" "$HOME/.config/$APP_NAME"
     echo "Done. Everything removed, including your clip history."
   else
+    rm -f "$HOME/.local/share/$APP_NAME/quitting"
     echo "Done. Your clip history is still at ~/.local/share/$APP_NAME — re-run with '--uninstall --purge' to delete it too."
   fi
   exit 0
@@ -67,7 +88,7 @@ fi
 echo "Installing Visual Clipboard to $INSTALL_DIR ..."
 # an already-running instance holds the single-instance lock: the launch at the end of this
 # script would just toggle the OLD code's panel and quit, so an update looks like nothing happened
-pkill -f "$INSTALL_DIR" 2>/dev/null && sleep 1 || true
+stop_running
 mkdir -p "$INSTALL_DIR/renderer" "$INSTALL_DIR/assets" "$INSTALL_DIR/src" "$BIN_DIR" "$DESKTOP_DIR"
 cp "$SCRIPT_DIR"/main.js "$SCRIPT_DIR"/preload.js "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/
 cp "$SCRIPT_DIR"/src/*.js "$INSTALL_DIR"/src/
@@ -117,6 +138,18 @@ if [ "\${1:-}" = "--uninstall" ]; then
   fi
 
   echo "Removing Visual Clipboard..."
+  # the supervisor loop respawns the app on any unexpected exit — tell it this one is
+  # deliberate before killing anything, or uninstall turns into a restart
+  mkdir -p "$HOME/.local/share/$APP_NAME" 2>/dev/null || true
+  : > "$HOME/.local/share/$APP_NAME/quitting" 2>/dev/null || true
+  # the running instance holds the tray icon and global shortcut. Drop it before the files:
+  # its own shutdown writes history.json, which would land right back into a purged data dir.
+  # ^ anchors the match to argv[0] — an unanchored pattern also kills every shell that merely
+  # names the path in an argument, this one included.
+  APP_PROC="^$INSTALL_DIR/node_modules/electron/dist/electron"
+  pkill -f "\$APP_PROC" 2>/dev/null || true
+  sleep 2
+  pkill -9 -f "\$APP_PROC" 2>/dev/null || true
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_DIR/$APP_NAME"
   rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
@@ -126,11 +159,9 @@ if [ "\${1:-}" = "--uninstall" ]; then
     rm -rf "$HOME/.local/share/$APP_NAME" "$HOME/.config/$APP_NAME"
     echo "Done. Everything removed, including your clip history."
   else
+    rm -f "$HOME/.local/share/$APP_NAME/quitting"
     echo "Done. Your clip history is still at ~/.local/share/$APP_NAME — run '$APP_NAME --uninstall --purge' to delete it too."
   fi
-  # the running instance holds the tray icon and global shortcut — drop it last.
-  # match on the app dir, not the process name: an unpackaged Electron app is just "electron".
-  pkill -f "$INSTALL_DIR" 2>/dev/null || true
   exit 0
 fi
 APP_DIR="$INSTALL_DIR"
@@ -154,16 +185,54 @@ esac
 # node like nvm isn't on the session PATH) — that's why the terminal worked but the icon didn't.
 ELECTRON="\$APP_DIR/node_modules/electron/dist/electron"
 LOG="$HOME/.local/share/$APP_NAME/launch.log"
-echo "=== \$(date '+%F %T') launch tty=\$([ -t 1 ] && echo yes || echo no) sandbox=\$([ -n "\$SANDBOX_FLAG" ] && echo off || echo on) args=[\$*] ===" >> "\$LOG" 2>&1
-# \$SANDBOX_FLAG is deliberately unquoted: empty must vanish, not become an empty argv entry
-if [ -t 1 ]; then
+# Sair writes this file. An exit code cannot carry that intent: Electron's own
+# "Failed to shutdown." abort makes a deliberate quit look exactly like a crash.
+QUIT_FLAG="$HOME/.local/share/$APP_NAME/quitting"
+
+if [ "\${1:-}" = "--_supervise" ]; then
+  shift
+elif [ -t 1 ]; then
   # terminal: detach so the shell returns immediately and closing it won't kill the app
-  setsid "\$ELECTRON" \$SANDBOX_FLAG "\$APP_DIR" "\$@" >> "\$LOG" 2>&1 < /dev/null &
-else
-  # menu / autostart (no tty): run in FOREGROUND so the systemd app-scope keeps it alive.
-  # Backgrounding + exiting here lets GNOME tear the scope (and Electron) down = "won't open".
-  exec "\$ELECTRON" \$SANDBOX_FLAG "\$APP_DIR" "\$@" >> "\$LOG" 2>&1
+  setsid "\$0" --_supervise "\$@" >/dev/null 2>&1 < /dev/null &
+  exit 0
 fi
+
+# From here the supervisor loop is the FOREGROUND process, so the systemd app-scope GNOME
+# opens for the menu/autostart launch keeps it alive. It exists because the app used to die
+# on its own — 32 "GPU process isn't usable. Goodbye." aborts in this very log, always while
+# the machine sat idle, leaving nothing running for a button inside the app to restart.
+tries=0
+window_start=\$(date +%s)
+while :; do
+  # rotate here and not in the app: the app inherits this append fd, so renaming the file from
+  # inside would leave it writing to the renamed inode
+  if [ -f "\$LOG" ] && [ "\$(stat -c%s "\$LOG" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+    mv -f "\$LOG" "\$LOG.1"
+  fi
+  echo "=== \$(date '+%F %T') launch tty=\$([ -t 1 ] && echo yes || echo no) sandbox=\$([ -n "\$SANDBOX_FLAG" ] && echo off || echo on) args=[\$*] ===" >> "\$LOG" 2>&1
+  # \$SANDBOX_FLAG is deliberately unquoted: empty must vanish, not become an empty argv entry
+  CLP_SUPERVISED=1 "\$ELECTRON" \$SANDBOX_FLAG "\$APP_DIR" "\$@" >> "\$LOG" 2>&1 < /dev/null
+  code=\$?
+  if [ -f "\$QUIT_FLAG" ]; then
+    rm -f "\$QUIT_FLAG"
+    break
+  fi
+  [ "\$code" -eq 0 ] && break
+  now=\$(date +%s)
+  if [ \$((now - window_start)) -gt 300 ]; then
+    tries=0
+    window_start=\$now
+  fi
+  tries=\$((tries + 1))
+  # a machine where the app cannot start at all (broken install, no X) would otherwise respawn
+  # forever, filling the log with the same crash
+  if [ "\$tries" -gt 5 ]; then
+    echo "=== \$(date '+%F %T') supervisor: 5 quedas em 5min, desistindo (exit=\$code) ===" >> "\$LOG" 2>&1
+    break
+  fi
+  echo "=== \$(date '+%F %T') supervisor: exit=\$code, religando em 2s (tentativa \$tries) ===" >> "\$LOG" 2>&1
+  sleep 2
+done
 LAUNCHER
 chmod +x "$BIN_DIR/$APP_NAME"
 

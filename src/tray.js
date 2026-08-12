@@ -85,6 +85,9 @@ function updateTrayMenu() {
     // ponytail: toggle off state.config, not item.checked — AppIndicator (Linux tray) doesn't
     // flip a checkbox's state on click, so item.checked reports the old value and nothing happens.
     { type: 'checkbox', label: 'Pausar captura', checked: !!state.config.paused, click: () => setPaused(!state.config.paused) },
+    // the tray survives a dead or unpainted panel, so this is the restart path that still
+    // works when the window is the thing that broke
+    { label: 'Reiniciar', click: () => state.restartApp && state.restartApp('bandeja') },
     { type: 'separator' },
     // quit, not exit: before-quit must run — it saves the store, releases the global shortcut
     // and lets Chromium clean up its singleton files (an exit(0) here left them behind)

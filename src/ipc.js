@@ -125,6 +125,9 @@ function setupIpc() {
     broadcast();
   });
   handle('panel:hide', () => hidePanel());
+  // deferred one tick: restartApp() exits the process, and the invoke reply has to reach the
+  // renderer first or the panel hangs on a promise that never settles
+  handle('app:restart', () => { setTimeout(() => state.restartApp && state.restartApp('painel'), 100); });
   handle('stats:usage', () => {
     const u = scanUsage();
     const age = electronAgeDays();

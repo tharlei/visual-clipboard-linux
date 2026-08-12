@@ -13,6 +13,10 @@ const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'visual-clipboard.desktop');
 const LAUNCHER_FILE = path.join(os.homedir(), '.local', 'bin', 'visual-clipboard');
+// the launcher supervises the app and restarts it on any non-zero exit. This file is how a
+// deliberate "Sair" tells it not to: an exit code cannot, because Electron's own shutdown
+// FATAL ("Failed to shutdown.", 12 times in launch.log) makes a clean quit look like a crash.
+const QUIT_FLAG = path.join(DATA_DIR, 'quitting');
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_TEXT_CHARS = 2 * 1024 * 1024;
@@ -23,6 +27,14 @@ const THUMB_HEIGHT = 240;
 const THUMB_WIDTH = 480;
 
 const MAX_IGNORE_PATTERNS = 50;
+
+const HEARTBEAT_MS = 60000;
+// readClipboard() is synchronous and runs on the main process. An X11 selection owner that
+// stops answering blocks it — and with it the tray, the shortcut and every IPC reply. That is
+// a freeze with no trace today, so anything this slow gets its own line.
+const POLL_SLOW_MS = 1000;
+// exit code the restart button uses: non-zero so the launcher's supervisor loop respawns
+const RESTART_CODE = 42;
 
 // Chromium ships inside Electron and this renderer decodes images strangers put on the
 // clipboard. The sandbox contains a decoder bug; only an upgrade removes it. Roughly a
@@ -54,8 +66,9 @@ const DEBUG = !!process.env.CLP_DEBUG;
 
 module.exports = {
   DATA_DIR, IMAGES_DIR, THUMBS_DIR, HISTORY_FILE, CONFIG_FILE, AUTOSTART_FILE, LAUNCHER_FILE,
-  MAX_IMAGE_BYTES, MAX_TEXT_CHARS, POLL_MS, PREVIEW_CHARS, PANEL_HEIGHT,
+  QUIT_FLAG, MAX_IMAGE_BYTES, MAX_TEXT_CHARS, POLL_MS, PREVIEW_CHARS, PANEL_HEIGHT,
   THUMB_HEIGHT, THUMB_WIDTH, MAX_IGNORE_PATTERNS, ELECTRON_STALE_DAYS,
+  HEARTBEAT_MS, POLL_SLOW_MS, RESTART_CODE,
   GNOME_FILES_FORMAT, SECRET_HINT_FORMATS, VIDEO_EXTS, IMAGE_EXTS, BOARD_COLORS,
   DEFAULT_CONFIG, DEBUG,
 };

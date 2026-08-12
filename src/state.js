@@ -15,4 +15,10 @@ module.exports = {
   hasXdotool: false,
   imageDue: true,
   pollNow: null,
+  restartApp: null,
+  // read by the heartbeat: a poll delta far below HEARTBEAT_MS/POLL_MS means the main
+  // process was blocked, which is the one thing a frozen app cannot report about itself
+  pollCount: 0,
+  pollMaxMs: 0,
+  pollErrors: 0,
 };

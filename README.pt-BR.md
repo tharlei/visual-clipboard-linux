@@ -74,6 +74,29 @@ Edite o arquivo e reinicie, ou use o painel ⚙ **Configurações** no app (apli
 { "ignorePatterns": ["BEGIN RSA PRIVATE KEY", "ghp_", "AKIA"] }
 ```
 
+### Quando ele para de funcionar
+
+**Reiniciar.** Bandeja → *Reiniciar*, ou ⚙ **Configurações** → *Reiniciar*. Salva o histórico, mata qualquer processo do app que tenha sobrado de uma sessão anterior (é ele quem ainda segura o ícone da bandeja e o atalho global) e sobe uma instância limpa. O caminho da bandeja continua funcionando quando o painel é justamente o que quebrou.
+
+**Ele volta sozinho.** O lançador supervisiona o processo: saída inesperada religa em 2 s, com teto de 5 quedas em 5 min pra não virar loop. Sair pelo menu não religa. Isso existe porque o app morria sozinho — `FATAL ... GPU process isn't usable. Goodbye.` — sem deixar nada vivo pra um botão dentro dele reiniciar.
+
+**O log diz o que houve.** `~/.local/share/visual-clipboard/launch.log` (rotaciona em 2 MB para `launch.log.1`). Uma linha por minuto:
+
+```
+2026-08-12 09:49:12.634 INFO [clp] hb up=1min ocioso=0s clips=1 poll=+119 lento=53ms err=0
+  paineis=1/0 atalho=Control+Alt+V:ok Browser=162MB Tab=98MB
+```
+
+`poll=+119` é o normal (uma leitura a cada 500 ms). Como ler:
+
+| No log | O que foi |
+| --- | --- |
+| as linhas `hb` param | processo principal travado — provável leitura síncrona do clipboard presa num dono de seleção X11 morto |
+| `hb` continua, `poll=+3` | travou parte do minuto; `lento=` diz quanto durou a pior leitura |
+| `atalho=…:PERDIDO` | o grab X11 caiu (suspend, troca de VT); o próprio app re-registra e loga |
+| `child-gone tipo=GPU` | o processo de GPU caiu; se ele levar o app junto, o supervisor religa — o processo continua separado e com sandbox de propósito |
+| termina em `FATAL` | morreu; a linha `supervisor:` logo abaixo mostra o religamento |
+
 ## Segurança e privacidade
 
 Roda inteiramente na sua máquina. Não tem servidor, telemetria, conta ou chamadas de rede — nada é monitorado ou enviado a lugar nenhum. Seu histórico nunca sai de `~/.local/share/visual-clipboard/`.

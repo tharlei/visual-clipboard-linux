@@ -70,6 +70,7 @@ const usageTextEl = $('#usageText');
 const orphanTextEl = $('#orphanText');
 const pruneBtn = $('#pruneBtn');
 const clearBtn = $('#clearBtn');
+const restartBtn = $('#restartBtn');
 const setAutostartEl = $('#setAutostart');
 const staleRowEl = $('#staleRow');
 const staleTextEl = $('#staleText');
@@ -566,6 +567,11 @@ clearBtn.addEventListener('click', async () => {
   await window.clp.clear();
   resetClearBtn();
   refreshUsage();
+});
+restartBtn.addEventListener('click', () => {
+  restartBtn.disabled = true;
+  restartBtn.textContent = 'Reiniciando…';
+  window.clp.restart();
 });
 shortcutCaptureBtn.addEventListener('click', () => {
   state.capturing = true;

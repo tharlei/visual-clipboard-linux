@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/security.test.js && bash test/sandbox-flag.test.sh"
+    "test": "node test/security.test.js && node test/procs.test.js && bash test/sandbox-flag.test.sh"
   },
   "license": "MIT",
   "devDependencies": {
