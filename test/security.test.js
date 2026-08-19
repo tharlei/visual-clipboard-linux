@@ -1,9 +1,6 @@
 'use strict';
 
-// Covers src/validate.js — the guards that stand between untrusted input (history.json,
-// config.json, a path someone else put on the clipboard) and path.join/globalShortcut/
-// shell.openPath. Plain asserts: validate.js pulls only node:path + src/constants.js,
-// so this runs under bare `node`, no Electron, no framework.
+/** Covers src/validate.js: the guards between untrusted input and path.join/globalShortcut/openPath. */
 
 const assert = require('node:assert');
 
@@ -16,14 +13,10 @@ const stat = ({ dir = false, file = true, mode = 0o644 }) => ({
   mode,
 });
 
-// ---------- hasModifier ----------
-
 assert.equal(hasModifier('V'), false, 'bare key has no modifier');
 assert.equal(hasModifier('Control+Alt+V'), true);
 assert.equal(hasModifier('CommandOrControl+Shift+V'), true);
 assert.equal(hasModifier('Nope+V'), false, 'unknown modifier name is not a modifier');
-
-// ---------- normalizeConfig ----------
 
 {
   const c = normalizeConfig({ maxItems: 999999 }, DEFAULT_CONFIG);
@@ -34,7 +27,6 @@ assert.equal(hasModifier('Nope+V'), false, 'unknown modifier name is not a modif
   assert.equal(c.maxItems, 10, 'maxItems clamped down');
 }
 {
-  // a bare key registered as a global shortcut swallows that key for every app on the desktop
   const c = normalizeConfig({ shortcut: 'V' }, DEFAULT_CONFIG);
   assert.equal(c.shortcut, DEFAULT_CONFIG.shortcut, 'modifier-less accelerator refused');
 }
@@ -52,8 +44,6 @@ assert.equal(hasModifier('Nope+V'), false, 'unknown modifier name is not a modif
   assert.deepEqual(c.ignorePatterns, [], 'non-array ignorePatterns dropped');
   assert.equal(c.paused, true, 'paused coerced to boolean');
 }
-
-// ---------- sanitizeStore ----------
 
 {
   const store = sanitizeStore({
@@ -77,8 +67,6 @@ assert.equal(hasModifier('Nope+V'), false, 'unknown modifier name is not a modif
 
   const good = store.clips.find((c) => c.id === 'good1');
   assert.deepEqual(good.boardIds, ['b_ok'], 'boardIds pointing at dropped boards are stripped');
-
-  // imageFile feeds path.join(DATA_DIR, ...) — it must be exactly the id-derived name
   assert.equal(store.clips.find((c) => c.id === 'img1').imageFile, 'images/img1.png');
 }
 {
@@ -96,8 +84,6 @@ assert.equal(hasModifier('Nope+V'), false, 'unknown modifier name is not a modif
   assert.equal(c.pinned, false);
 }
 
-// ---------- riskyToOpen ----------
-
 assert.equal(riskyToOpen('/tmp/notes.txt', stat({}), 'hello'), false, 'plain text file is fine');
 assert.equal(riskyToOpen('/tmp/pics', stat({ dir: true, file: false }), ''), false, 'directory is fine');
 assert.equal(riskyToOpen('/dev/sda', stat({ file: false }), ''), true, 'non-regular file is risky');
@@ -105,12 +91,8 @@ assert.equal(riskyToOpen('/tmp/notes.txt', stat({ mode: 0o755 }), 'hello'), true
 assert.equal(riskyToOpen('/tmp/notes.txt', stat({}), '#!/bin/sh\n'), true, 'shebang is risky');
 assert.equal(riskyToOpen('/tmp/x', stat({}), '[Desktop Entry]\nExec=rm -rf'), true, 'desktop entry is risky');
 assert.equal(riskyToOpen('/tmp/run.sh', stat({}), 'echo hi'), true, 'risky extension');
-// a file:// URI ending in %20 decodes to a trailing space: extname is ".desktop ", but GIO
-// still content-sniffs and launches it
 assert.equal(riskyToOpen('/tmp/evil.desktop ', stat({}), ''), true, 'extension trimmed before the check');
 assert.equal(riskyToOpen('/tmp/EVIL.DESKTOP', stat({}), ''), true, 'extension lowercased before the check');
-
-// ---------- matchesIgnore ----------
 
 assert.equal(matchesIgnore('anything', []), false, 'no patterns, no match');
 assert.equal(matchesIgnore('anything', undefined), false, 'missing patterns, no match');

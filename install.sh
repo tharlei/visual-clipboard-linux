@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Installs Visual Clipboard into the standard per-user XDG locations:
-#   ~/.local/share/visual-clipboard/app          — app code + node_modules
-#   ~/.local/bin/visual-clipboard                — launcher on PATH
-#   ~/.local/share/applications/*.desktop — app-menu entry
+# Installs Visual Clipboard into the per-user XDG locations. Rationale: AGENTS.md §15.
 set -euo pipefail
 
 APP_NAME="visual-clipboard"
@@ -12,30 +9,18 @@ BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
 CONFIG_JSON="$HOME/.local/share/$APP_NAME/config.json"
 
-# The launcher supervises the app and respawns it on any unexpected exit, so a bare pkill now
-# means "restart it", not "stop it" — an update would race the copy and an uninstall would keep
-# reviving a deleted binary. This flag is how a deliberate stop says which one it is. Written
-# only when the data dir already exists: creating it here would land 0755 instead of the app's
-# own 0700, and there is nothing running to stop before the first install anyway.
-# `pkill -f` matches the WHOLE command line, so a bare "$INSTALL_DIR" also hits every shell,
-# editor and pgrep that merely names the path in an argument — including the shell running this
-# script, which is how the -9 below once killed the installer mid-run. Anchoring with ^ pins the
-# match to argv[0], i.e. only processes actually RUNNING the app's own binary. Matching the dir
-# rather than the process name stays deliberate: an unpackaged Electron app is just "electron".
+# ^ anchors the match to argv[0]: an unanchored pattern also kills shells that merely name the path.
 APP_PROC="^$INSTALL_DIR/node_modules/electron/dist/electron"
+
+# Stops a running instance: flags the exit as deliberate, then SIGTERM and SIGKILL.
 stop_running() {
   [ -d "$HOME/.local/share/$APP_NAME" ] && : > "$HOME/.local/share/$APP_NAME/quitting" 2>/dev/null || true
   pkill -f "$APP_PROC" 2>/dev/null && sleep 2 || true
-  # SIGTERM is a request, and a wedged instance cannot honour it: one was caught spinning at
-  # 100% CPU for two minutes after being asked to quit, still holding the tray icon and the
-  # global shortcut while its replacement was already running. Whatever ignored the polite
-  # signal is exactly what must not survive into the new install.
   pkill -9 -f "$APP_PROC" 2>/dev/null && sleep 1 || true
 }
 
+# Removes the app; keeps clip history unless --purge or option 2 is chosen.
 uninstall() {
-  # Ask before touching clip history — it's the only thing here that isn't re-creatable
-  # by re-running this script. Non-interactive (curl | bash) keeps the data.
   local purge=n
   if [ "${1:-}" = "--purge" ]; then
     purge=y
@@ -66,8 +51,7 @@ uninstall() {
 
 [ "${1:-}" = "--uninstall" ] && uninstall "${2:-}"
 
-# Running as a local checkout (./install.sh) vs. piped in (curl ... | bash, where
-# BASH_SOURCE points at a fd/pipe, not a real file next to the app's sources).
+# Local checkout (./install.sh) vs. piped in (curl ... | bash), which needs a clone first.
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 if [ -n "$SCRIPT_SOURCE" ] && [ -f "$SCRIPT_SOURCE" ] && [ -f "$(dirname "$SCRIPT_SOURCE")/main.js" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -86,8 +70,6 @@ if ! command -v xdotool >/dev/null 2>&1; then
 fi
 
 echo "Installing Visual Clipboard to $INSTALL_DIR ..."
-# an already-running instance holds the single-instance lock: the launch at the end of this
-# script would just toggle the OLD code's panel and quit, so an update looks like nothing happened
 stop_running
 mkdir -p "$INSTALL_DIR/renderer" "$INSTALL_DIR/assets" "$INSTALL_DIR/src" "$BIN_DIR" "$DESKTOP_DIR"
 cp "$SCRIPT_DIR"/main.js "$SCRIPT_DIR"/preload.js "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/
@@ -96,20 +78,14 @@ cp "$SCRIPT_DIR"/renderer/*.html "$SCRIPT_DIR"/renderer/*.css "$SCRIPT_DIR"/rend
 cp "$SCRIPT_DIR"/assets/icon.png "$SCRIPT_DIR"/assets/icon.svg "$INSTALL_DIR"/assets/
 
 echo "Installing dependencies (downloads Electron, ~150MB, may take a while)..."
-# `ci` installs exactly what package-lock.json pins; --ignore-scripts blocks dependency
-# lifecycle hooks. Electron's binary download is invoked explicitly right below.
 (cd "$INSTALL_DIR" && npm ci --ignore-scripts)
 
-# Electron 43 dropped the postinstall hook that fetched the binary, so `npm install`
-# alone leaves node_modules/electron/dist missing and the app silently won't start.
+# Electron 43 dropped the postinstall hook that fetched the binary — invoke it explicitly.
 ELECTRON_BIN="$INSTALL_DIR/node_modules/electron/dist/electron"
 [ -x "$ELECTRON_BIN" ] || (cd "$INSTALL_DIR" && node node_modules/electron/install.js)
 [ -x "$ELECTRON_BIN" ] || { echo "Electron binary download failed — check your connection and re-run."; exit 1; }
 
-# Electron ships the Chromium that decodes clipboard images, and the sandbox contains such a
-# bug rather than fixing it — a stale Electron is the one dependency here worth nagging about.
-# `npm ci` installs exactly what the lockfile pins, so a newer release needs an explicit bump.
-# Advisory only: no network, no registry, or a timeout must never fail an install.
+# Advisory only: no network, no registry or a timeout must never fail an install.
 ELECTRON_HAVE="$(node -p "require('$INSTALL_DIR/node_modules/electron/package.json').version" 2>/dev/null || true)"
 ELECTRON_LATEST="$(cd "$INSTALL_DIR" && timeout 15 npm view electron version 2>/dev/null || true)"
 if [ -n "$ELECTRON_HAVE" ] && [ -n "$ELECTRON_LATEST" ] && [ "$ELECTRON_HAVE" != "$ELECTRON_LATEST" ]; then
@@ -124,8 +100,6 @@ fi
 cat > "$BIN_DIR/$APP_NAME" <<LAUNCHER
 #!/usr/bin/env bash
 if [ "\${1:-}" = "--uninstall" ]; then
-  # Ask before touching clip history — it's the only thing here that reinstalling
-  # can't bring back. Non-interactive callers keep the data unless --purge is passed.
   PURGE=n
   if [ "\${2:-}" = "--purge" ]; then
     PURGE=y
@@ -138,14 +112,8 @@ if [ "\${1:-}" = "--uninstall" ]; then
   fi
 
   echo "Removing Visual Clipboard..."
-  # the supervisor loop respawns the app on any unexpected exit — tell it this one is
-  # deliberate before killing anything, or uninstall turns into a restart
   mkdir -p "$HOME/.local/share/$APP_NAME" 2>/dev/null || true
   : > "$HOME/.local/share/$APP_NAME/quitting" 2>/dev/null || true
-  # the running instance holds the tray icon and global shortcut. Drop it before the files:
-  # its own shutdown writes history.json, which would land right back into a purged data dir.
-  # ^ anchors the match to argv[0] — an unanchored pattern also kills every shell that merely
-  # names the path in an argument, this one included.
   APP_PROC="^$INSTALL_DIR/node_modules/electron/dist/electron"
   pkill -f "\$APP_PROC" 2>/dev/null || true
   sleep 2
@@ -165,56 +133,37 @@ if [ "\${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 APP_DIR="$INSTALL_DIR"
-# Sandbox stays ON. It is the only thing between a bug in Chromium's image decoder and code
-# running as this user, and decoding images someone else put on the clipboard is this
-# renderer's whole job (CVE-2023-4863 was exactly that, exploited in the wild). The CSP and
-# contextIsolation are JS-level barriers; native memory corruption walks past both.
-# What used to force it off: the sandboxed GPU process could not dlopen the Mesa driver
-# ("MESA-LOADER: failed to open dri ... Permission denied" -> "GPU process isn't usable.
-# Goodbye."). main.js now calls disableHardwareAcceleration(), so no DRI driver is loaded
-# at all and that failure cannot happen. Escape hatch if some machine still trips over the
-# sandbox (AppArmor restricting unprivileged user namespaces): VISUAL_CLIPBOARD_NO_SANDBOX=1
-# Only these exact words disable it. A plain -n test would treat NO_SANDBOX=0 and NO_SANDBOX=false
-# as "disable", i.e. the two spellings a person reaches for to say the opposite of what happens.
+# Sandbox stays ON — see AGENTS.md §1 and §2. Escape hatch: VISUAL_CLIPBOARD_NO_SANDBOX=1
 SANDBOX_FLAG=""
 case "\${VISUAL_CLIPBOARD_NO_SANDBOX:-}" in
   1|true|TRUE|True|yes|YES|Yes|on|ON|On) SANDBOX_FLAG="--no-sandbox" ;;
 esac
-# dist/electron = native binary (no \`node\` on PATH needed). The .bin/electron shim is a
-# cli.js with '#!/usr/bin/env node', which fails from the GNOME menu/boot (a version-manager
-# node like nvm isn't on the session PATH) — that's why the terminal worked but the icon didn't.
+# dist/electron is the native binary; the .bin/electron shim needs node on the session PATH.
 ELECTRON="\$APP_DIR/node_modules/electron/dist/electron"
 LOG="$HOME/.local/share/$APP_NAME/launch.log"
-# Sair writes this file. An exit code cannot carry that intent: Electron's own
-# "Failed to shutdown." abort makes a deliberate quit look exactly like a crash.
 QUIT_FLAG="$HOME/.local/share/$APP_NAME/quitting"
 
 if [ "\${1:-}" = "--_supervise" ]; then
   shift
 elif [ -t 1 ]; then
-  # terminal: detach so the shell returns immediately and closing it won't kill the app
   setsid "\$0" --_supervise "\$@" >/dev/null 2>&1 < /dev/null &
   exit 0
 fi
 
-# From here the supervisor loop is the FOREGROUND process, so the systemd app-scope GNOME
-# opens for the menu/autostart launch keeps it alive. It exists because the app used to die
-# on its own — 32 "GPU process isn't usable. Goodbye." aborts in this very log, always while
-# the machine sat idle, leaving nothing running for a button inside the app to restart.
+# Supervisor loop: respawns on any unexpected exit, gives up after 5 deaths in 5min.
 tries=0
 window_start=\$(date +%s)
 while :; do
-  # rotate here and not in the app: the app inherits this append fd, so renaming the file from
-  # inside would leave it writing to the renamed inode
   if [ -f "\$LOG" ] && [ "\$(stat -c%s "\$LOG" 2>/dev/null || echo 0)" -gt 2097152 ]; then
     mv -f "\$LOG" "\$LOG.1"
   fi
   echo "=== \$(date '+%F %T') launch tty=\$([ -t 1 ] && echo yes || echo no) sandbox=\$([ -n "\$SANDBOX_FLAG" ] && echo off || echo on) args=[\$*] ===" >> "\$LOG" 2>&1
-  # \$SANDBOX_FLAG is deliberately unquoted: empty must vanish, not become an empty argv entry
+  # \$SANDBOX_FLAG unquoted on purpose: empty must vanish, not become an empty argv entry.
   CLP_SUPERVISED=1 "\$ELECTRON" \$SANDBOX_FLAG "\$APP_DIR" "\$@" >> "\$LOG" 2>&1 < /dev/null
   code=\$?
   if [ -f "\$QUIT_FLAG" ]; then
     rm -f "\$QUIT_FLAG"
+    echo "=== \$(date '+%F %T') supervisor: saída deliberada (exit=\$code), encerrando ===" >> "\$LOG" 2>&1
     break
   fi
   [ "\$code" -eq 0 ] && break
@@ -224,8 +173,6 @@ while :; do
     window_start=\$now
   fi
   tries=\$((tries + 1))
-  # a machine where the app cannot start at all (broken install, no X) would otherwise respawn
-  # forever, filling the log with the same crash
   if [ "\$tries" -gt 5 ]; then
     echo "=== \$(date '+%F %T') supervisor: 5 quedas em 5min, desistindo (exit=\$code) ===" >> "\$LOG" 2>&1
     break
@@ -251,13 +198,8 @@ DESKTOP
 
 update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
 
-# Repair an autostart entry that invokes electron directly. Older installs wrote that form with
-# a hardcoded --no-sandbox, so login was the one path that started unsandboxed AND skipped the
-# launcher's log. It only ever got rewritten by toggling autostart in the tray, so it survived
-# every reinstall. Rewriting the Exec keeps the user's enabled/disabled choice intact.
+# Repairs an old autostart entry that invoked electron directly with a hardcoded --no-sandbox.
 AUTOSTART_FILE="$HOME/.config/autostart/$APP_NAME.desktop"
-# the tray writes the quoted form (Exec="…/visual-clipboard" --hidden), this file the bare one —
-# both route through the launcher, so both must pass or every install "fixes" a healthy entry
 if [ -f "$AUTOSTART_FILE" ] && ! grep -qF "Exec=$BIN_DIR/$APP_NAME " "$AUTOSTART_FILE" \
    && ! grep -qF "Exec=\"$BIN_DIR/$APP_NAME\" " "$AUTOSTART_FILE"; then
   cat > "$AUTOSTART_FILE" <<AUTOFIX
@@ -275,7 +217,7 @@ case ":$PATH:" in
   *) echo "Note: $BIN_DIR is not on your PATH. Add to ~/.bashrc or ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-# First-run config — interactive shells only; piped installs use defaults (change later in the app's ⚙)
+# First-run config — interactive shells only; piped installs use defaults.
 if [ -t 0 ] && [ ! -f "$CONFIG_JSON" ]; then
   echo ""
   echo "Configuração inicial (Enter = padrão; dá pra mudar depois no ⚙ do app):"
@@ -309,8 +251,7 @@ AUTO
   esac
 fi
 
-# Start it now — GNOME Shell caches the app list, so the menu icon often doesn't
-# show up until the next login and a fresh install otherwise looks like nothing happened.
+# Start it now: GNOME caches the app list, so the menu icon often lags a login.
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   setsid "$BIN_DIR/$APP_NAME" >/dev/null 2>&1 < /dev/null &
 fi

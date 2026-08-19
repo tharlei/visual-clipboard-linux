@@ -1,9 +1,6 @@
 'use strict';
 
-// Covers src/procs.js — the pid set the Reiniciar button SIGKILLs. Getting this wrong kills a
-// process that is not ours, so every rule gets a case: match on the app path and never the
-// name, skip our own subtree, follow a stray's children, and survive a comm with ') ' in it.
-// Plain asserts against a fake /proc: procs.js pulls only node:fs + node:path, no Electron.
+/** Covers src/procs.js: the pid set Reiniciar SIGKILLs, and the detached deadlines behind it. */
 
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -16,7 +13,7 @@ const APP = '/home/u/.local/share/visual-clipboard/app';
 const BIN = `${APP}/node_modules/electron/dist/electron`;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clp-proc-'));
 
-// stat is "pid (comm) state ppid ..." — comm is the field that can hide spaces and parens
+/** Writes a fake /proc/<pid> with a stat and cmdline. */
 function proc(pid, { ppid, comm = 'electron', cmdline }) {
   const dir = path.join(root, String(pid));
   fs.mkdirSync(dir);
@@ -32,23 +29,15 @@ proc(102, { ppid: 101, cmdline: [BIN, '--type=utility'] });
 const STRAY = 200;
 proc(STRAY, { ppid: 1, cmdline: [BIN, APP, '--hidden'] });
 proc(201, { ppid: STRAY, cmdline: [BIN, '--type=renderer'] });
-// the stray opened a file through shell.openPath() and the viewer is still its child —
-// sweeping a whole process tree would take the user's editor down with the restart
 proc(202, { ppid: STRAY, comm: 'gedit', cmdline: ['/usr/bin/gedit', '/home/u/notes.txt'] });
 
-// a comm containing ') ' would push the ppid field off by one on a naive split
 proc(300, { ppid: 1, comm: 'weird) name (x', cmdline: [BIN, APP] });
 
 proc(400, { ppid: 1, comm: 'firefox', cmdline: ['/usr/lib/firefox/firefox', '--new-tab'] });
-// same binary name, different install — the app path is what makes a process ours
 proc(401, { ppid: 1, cmdline: ['/opt/other-app/node_modules/electron/dist/electron', '/opt/other-app'] });
-// only MENTIONS the app path, in an argument. A terminal tailing the log, an editor, a pgrep —
-// killing these was the actual bug the first dry run of strayPids exposed.
 proc(402, { ppid: 1, comm: 'bash', cmdline: ['/bin/bash', '-c', `tail -f ${APP}/../launch.log`] });
 proc(403, { ppid: 1, comm: 'grep', cmdline: ['pgrep', '-af', APP] });
-// a sibling directory whose name merely starts the same must not match on a prefix test
 proc(404, { ppid: 1, cmdline: [`${APP}-old/node_modules/electron/dist/electron`, `${APP}-old`] });
-// non-numeric /proc entries must be ignored, not crash the scan
 fs.mkdirSync(path.join(root, 'self'));
 fs.writeFileSync(path.join(root, 'uptime'), '1 1\n');
 
@@ -63,10 +52,53 @@ assert.ok(!got.includes(404), 'app-old/ is not inside app/');
 assert.ok(!got.includes(202), "never kills what a stray opened — only what runs the app's own binary");
 
 assert.deepEqual(strayPids(APP, SELF, path.join(root, 'nope')), [], 'unreadable procRoot yields nothing');
-// an empty or root appPath would match every process on the box
 for (const bad of ['', '/', '.', 'relative/path', null, undefined]) {
   assert.deepEqual(strayPids(bad, SELF, root), [], `refuses appPath ${JSON.stringify(bad)}`);
 }
 
 fs.rmSync(root, { recursive: true, force: true });
+
+const { execSync, spawn } = require('node:child_process');
+const { procStart, killPidIn, guardHeartbeat } = require('../src/procs');
+
+const SELF_START = procStart(process.pid);
+assert.match(String(SELF_START), /^\d+$/, 'procStart reads field 22 of our own /proc stat');
+assert.equal(procStart(2, path.join(root, 'nope')), null, 'unreadable stat yields null');
+
+/** True while pid exists and is not a zombie. */
+function alive(pid) {
+  let stat;
+  try { stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); } catch { return false; }
+  return stat.slice(stat.lastIndexOf(')') + 1).trim()[0] !== 'Z';
+}
+
+/** Spawns a throwaway `sleep` to arm a deadline against. */
+function victim() {
+  const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+  child.on('error', () => {});
+  return child;
+}
+
+const doomed = victim();
+assert.ok(killPidIn(doomed.pid, procStart(doomed.pid), 1), 'arms against a live process');
+
+const spared = victim();
+assert.ok(killPidIn(spared.pid, '4294967295', 1), 'arms with a bogus start time too');
+
+execSync('sleep 3');
+
+assert.ok(!alive(doomed.pid), 'the deadline fired without this process doing anything');
+assert.ok(alive(spared.pid), 'a recycled pid is left alone — the safe direction to be wrong in');
+spared.kill('SIGKILL');
+
+assert.equal(killPidIn(1, SELF_START, 1), false, 'never targets init');
+assert.equal(killPidIn(doomed.pid, 'nope', 1), false, 'refuses a non-numeric start time');
+assert.equal(killPidIn(doomed.pid, SELF_START, -1), false, 'refuses a negative delay');
+assert.equal(killPidIn(1.5, SELF_START, 1), false, 'refuses a non-integer pid');
+
+const LOG = path.join(root, 'launch.log');
+assert.equal(guardHeartbeat("/tmp/it's-here/alive", 180, LOG), false, "refuses a quote in the path");
+assert.equal(guardHeartbeat(path.join(root, 'alive'), 180, "/tmp/o'log"), false, 'refuses it in the log path too');
+assert.equal(guardHeartbeat(path.join(root, 'alive'), 0, LOG), false, 'WATCHDOG_S=0 disables the guard');
+
 console.log('ok — procs');

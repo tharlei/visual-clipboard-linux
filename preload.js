@@ -24,7 +24,5 @@ contextBridge.exposeInMainWorld('clp', {
   onChanged: (cb) => ipcRenderer.on('clips:changed', (_e, snap) => cb(snap)),
   onShown: (cb) => ipcRenderer.on('panel:shown', () => cb()),
   onHidden: (cb) => ipcRenderer.on('panel:hidden', () => cb()),
-  // called by the renderer AFTER it drops the cards, so the decoded bitmaps are
-  // already unreferenced when Chromium's image cache is flushed
   purgeCache: () => { if (webFrame && typeof webFrame.clearCache === 'function') webFrame.clearCache(); },
 });

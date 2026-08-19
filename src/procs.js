@@ -2,25 +2,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
-// The restart button has to clear instances that outlived their session: launch.log shows
-// browser processes that stopped painting but kept the tray icon and the X11 grab, so a plain
-// relaunch would come back to a desktop where the shortcut is already taken.
-//
-// A process qualifies only if the binary it is RUNNING lives inside our app dir — argv[0], not
-// the whole cmdline, and never the process name (an unpackaged Electron app is just
-// "electron"). Matching anywhere in the cmdline picks up every shell, editor and `pgrep` that
-// merely mentions the path in an argument; that was not theoretical, the first dry run of this
-// function targeted the terminal it was invoked from. argv[0] alone is also enough to sweep a
-// whole stray instance: every Chromium child (zygote, gpu, renderer, utility, broker) re-execs
-// that same binary. Walking the process tree instead would drag in whatever the stray opened
-// through shell.openPath() — the user's editor is not ours to kill.
-//
-// Our own subtree is excluded: SIGKILLing this process's gpu/renderer right before it exits
-// writes exactly the FATAL noise into launch.log that this change exists to remove.
+/** Pids running the app's own binary (argv[0] inside appPath), excluding this process's subtree. */
 function strayPids(appPath, selfPid, procRoot = '/proc') {
-  // an empty appPath makes the startsWith() below true for every process on the box. Nothing
-  // reachable passes one, and the blast radius of being wrong is the user's whole session.
   if (!appPath || !path.isAbsolute(appPath) || appPath === path.sep) return [];
 
   const children = new Map();
@@ -33,18 +18,15 @@ function strayPids(appPath, selfPid, procRoot = '/proc') {
     const pid = Number(name);
     let stat;
     try { stat = fs.readFileSync(path.join(procRoot, name, 'stat'), 'utf8'); } catch { continue; }
-    // comm sits in parentheses and may contain spaces and ')' itself — split after the LAST one,
-    // so ppid is reliably the second field of the remainder
     const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
     const ppid = Number(fields[1]);
     if (!Number.isInteger(ppid)) continue;
     if (!children.has(ppid)) children.set(ppid, []);
     children.get(ppid).push(pid);
     try {
-      // cmdline is NUL-separated; argv[0] is the executable the kernel actually launched
       const argv0 = fs.readFileSync(path.join(procRoot, name, 'cmdline'), 'utf8').split('\0')[0];
       if (argv0.startsWith(appPath + path.sep)) matches.push(pid);
-    } catch { /* the process ended between readdir and here */ }
+    } catch {}
   }
 
   const ours = new Set();
@@ -58,4 +40,64 @@ function strayPids(appPath, selfPid, procRoot = '/proc') {
   return matches.filter((pid) => !ours.has(pid));
 }
 
-module.exports = { strayPids };
+/** Field 22 of /proc/<pid>/stat — the boot-clock start time, unique per pid incarnation. */
+function procStart(pid, procRoot = '/proc') {
+  try {
+    const stat = fs.readFileSync(path.join(procRoot, String(pid), 'stat'), 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[19] || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Runs a shell script in a detached child that outlives this process. */
+function detach(script) {
+  spawn('sh', ['-c', script], { detached: true, stdio: 'ignore' }).unref();
+}
+
+/** Shell test that pid still has the same start time, i.e. was not recycled. */
+function stillUs(pid, start) {
+  return `[ "$(cut -d' ' -f22 /proc/${pid}/stat 2>/dev/null)" = "${start}" ]`;
+}
+
+/** Single-quotes a path for a shell string, or returns null when it holds a quote itself. */
+function shQuote(p) {
+  return typeof p === 'string' && p && !p.includes("'") ? `'${p}'` : null;
+}
+
+/** Arms a detached SIGKILL against pid, firing only while it is still the same incarnation. */
+function killPidIn(pid, start, seconds) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  if (!/^\d+$/.test(String(start))) return false;
+  if (!Number.isFinite(seconds) || seconds < 0) return false;
+  detach(`sleep ${Math.floor(seconds)}; ${stillUs(pid, start)} && kill -9 ${pid}`);
+  return true;
+}
+
+/** Arms the detached killer against this process — call before anything that can block. */
+function killSelfIn(seconds) {
+  return killPidIn(process.pid, procStart(process.pid), seconds);
+}
+
+/** Detached watchdog: SIGKILLs this process once `file` has gone unstale-touched for staleSeconds. */
+function guardHeartbeat(file, staleSeconds, logFile) {
+  const start = procStart(process.pid);
+  const f = shQuote(file);
+  const log = shQuote(logFile);
+  if (!/^\d+$/.test(String(start)) || !f || !log) return false;
+  if (!Number.isFinite(staleSeconds) || staleSeconds <= 0) return false;
+  const pid = process.pid;
+  const alive = stillUs(pid, start);
+  const stale = Math.floor(staleSeconds);
+  detach(
+    `while ${alive}; do sleep 30;`
+    + ` hb=$(stat -c%Y ${f} 2>/dev/null || echo 0);`
+    + ' age=$(( $(date +%s) - hb ));'
+    + ` if [ "$age" -gt ${stale} ]; then`
+    + ` echo "=== $(date '+%F %T') watchdog: sem heartbeat há \${age}s, matando ${pid} ===" >> ${log};`
+    + ` ${alive} && kill -9 ${pid}; exit; fi; done`
+  );
+  return true;
+}
+
+module.exports = { strayPids, procStart, killPidIn, killSelfIn, guardHeartbeat };

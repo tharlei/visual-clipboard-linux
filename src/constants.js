@@ -13,10 +13,10 @@ const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'visual-clipboard.desktop');
 const LAUNCHER_FILE = path.join(os.homedir(), '.local', 'bin', 'visual-clipboard');
-// the launcher supervises the app and restarts it on any non-zero exit. This file is how a
-// deliberate "Sair" tells it not to: an exit code cannot, because Electron's own shutdown
-// FATAL ("Failed to shutdown.", 12 times in launch.log) makes a clean quit look like a crash.
+/** Marks an exit as deliberate so the launcher's supervisor stops instead of respawning. */
 const QUIT_FLAG = path.join(DATA_DIR, 'quitting');
+/** Touched every heartbeat; its mtime is the only main-thread liveness proof readable from outside. */
+const HEARTBEAT_FILE = path.join(DATA_DIR, 'alive');
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_TEXT_CHARS = 2 * 1024 * 1024;
@@ -29,20 +29,20 @@ const THUMB_WIDTH = 480;
 const MAX_IGNORE_PATTERNS = 50;
 
 const HEARTBEAT_MS = 60000;
-// readClipboard() is synchronous and runs on the main process. An X11 selection owner that
-// stops answering blocks it — and with it the tray, the shortcut and every IPC reply. That is
-// a freeze with no trace today, so anything this slow gets its own line.
+/** A clipboard read slower than this blocked the main process — gets its own log line. */
 const POLL_SLOW_MS = 1000;
-// exit code the restart button uses: non-zero so the launcher's supervisor loop respawns
+/** Exit code the restart button uses: non-zero so the supervisor respawns. */
 const RESTART_CODE = 42;
+/** Seconds Reiniciar and Sair wait for a graceful shutdown before the detached killer fires. */
+const EXIT_GRACE_S = 5;
+/** Seconds without a heartbeat before the watchdog SIGKILLs; 0 disables it. Never go under 120. */
+const WATCHDOG_S = Number(process.env.CLP_WATCHDOG_S ?? 180);
 
-// Chromium ships inside Electron and this renderer decodes images strangers put on the
-// clipboard. The sandbox contains a decoder bug; only an upgrade removes it. Roughly a
-// quarter of a year without one is worth a tray warning.
+/** Days since the last Electron install before the tray warns about stale Chromium. */
 const ELECTRON_STALE_DAYS = 90;
 
 const GNOME_FILES_FORMAT = 'x-special/gnome-copied-files';
-// clipboard targets password managers set to mark a selection as "do not record"
+/** Clipboard targets password managers set to mark a selection as "do not record". */
 const SECRET_HINT_FORMATS = new Set([
   'x-kde-passwordManagerHint',
   'org.nspasteboard.ConcealedType',
@@ -66,7 +66,7 @@ const DEBUG = !!process.env.CLP_DEBUG;
 
 module.exports = {
   DATA_DIR, IMAGES_DIR, THUMBS_DIR, HISTORY_FILE, CONFIG_FILE, AUTOSTART_FILE, LAUNCHER_FILE,
-  QUIT_FLAG, MAX_IMAGE_BYTES, MAX_TEXT_CHARS, POLL_MS, PREVIEW_CHARS, PANEL_HEIGHT,
+  QUIT_FLAG, HEARTBEAT_FILE, EXIT_GRACE_S, WATCHDOG_S, MAX_IMAGE_BYTES, MAX_TEXT_CHARS, POLL_MS, PREVIEW_CHARS, PANEL_HEIGHT,
   THUMB_HEIGHT, THUMB_WIDTH, MAX_IGNORE_PATTERNS, ELECTRON_STALE_DAYS,
   HEARTBEAT_MS, POLL_SLOW_MS, RESTART_CODE,
   GNOME_FILES_FORMAT, SECRET_HINT_FORMATS, VIDEO_EXTS, IMAGE_EXTS, BOARD_COLORS,

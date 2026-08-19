@@ -13,12 +13,14 @@ const RISKY_EXTS = new Set([
   'py', 'pl', 'rb', 'php', 'lua', 'jar', 'deb', 'rpm', 'exe', 'msi', 'bat', 'cmd', 'ps1',
 ]);
 
+/** True when an accelerator carries at least one modifier and every prefix part is a known one. */
 function hasModifier(accel) {
   const parts = String(accel).split('+');
   parts.pop();
   return parts.length > 0 && parts.every((m) => MODIFIER_RE.test(m));
 }
 
+/** Coerces and clamps a config object, keeping the default on anything invalid. */
 function normalizeConfig(raw, defaults) {
   const c = { ...defaults, ...(raw || {}) };
   return {
@@ -35,6 +37,7 @@ function normalizeConfig(raw, defaults) {
   };
 }
 
+/** Coerces a store read from disk, dropping ids, paths and payloads that fail their shape. */
 function sanitizeStore(store) {
   store.version = 1;
   store.boards = (Array.isArray(store.boards) ? store.boards : [])
@@ -69,9 +72,7 @@ function sanitizeStore(store) {
   return store;
 }
 
-// `head` is the first bytes of the file. the extension alone is not a control: a path ending
-// in ".desktop " (a file:// URI ending %20) has extname ".desktop " and misses the list, while
-// GIO still content-sniffs it as a desktop entry and launches it.
+/** True when opening this path could execute code — exec bit, shebang, desktop entry or risky extension. */
 function riskyToOpen(filePath, stat, head = '') {
   if (stat.isDirectory()) return false;
   if (!stat.isFile()) return true;
@@ -80,6 +81,7 @@ function riskyToOpen(filePath, stat, head = '') {
   return RISKY_EXTS.has(path.extname(filePath).slice(1).trim().toLowerCase());
 }
 
+/** True when the text contains any of the user's ignore patterns, case-insensitively. */
 function matchesIgnore(text, patterns) {
   if (!Array.isArray(patterns) || !patterns.length) return false;
   const hay = String(text).toLowerCase();

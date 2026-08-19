@@ -10,6 +10,7 @@ const { normalizeConfig, sanitizeStore } = require('./validate');
 
 let saveTimer = null;
 
+/** Parses a JSON file over `fallback`, renaming a corrupt one to .bak. */
 function loadJson(file, fallback) {
   try {
     return { ...fallback, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -22,7 +23,7 @@ function loadJson(file, fallback) {
   }
 }
 
-// installs from before the umask shipped left history.json at 0644 (0664 under a 002 umask)
+/** Re-applies 0700/0600 to the data dirs and files, fixing installs from before the umask. */
 function hardenPerms() {
   for (const dir of [DATA_DIR, IMAGES_DIR, THUMBS_DIR]) {
     try { fs.chmodSync(dir, 0o700); } catch {}
@@ -37,53 +38,57 @@ function hardenPerms() {
   }
 }
 
+/** Creates the data dirs and loads history and config through the sanitizers. */
 function loadStore() {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
   fs.mkdirSync(THUMBS_DIR, { recursive: true });
   hardenPerms();
-  // history.json and config.json are untrusted input: they sit on disk, older installs left
-  // them group-writable, and their fields feed path.join() and the renderer's markup
   state.store = sanitizeStore(loadJson(HISTORY_FILE, { version: 1, boards: [], clips: [] }));
   state.config = normalizeConfig(loadJson(CONFIG_FILE, DEFAULT_CONFIG), DEFAULT_CONFIG);
   if (!fs.existsSync(CONFIG_FILE)) saveJsonAtomic(CONFIG_FILE, state.config);
 }
 
-// mode is belt to the umask's braces: it only applies on create, and the tmp is always new.
-// without it the 0600 guarantee would rest solely on main.js being the entry point.
+/** Writes JSON through a 0600 tmp file and renames it into place. */
 function saveJsonAtomic(file, data) {
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 1), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
+/** Writes history.json now, cancelling any pending debounce. */
 function saveStore() {
   clearTimeout(saveTimer);
   saveTimer = null;
   try { saveJsonAtomic(HISTORY_FILE, state.store); } catch (err) { console.error('[clp] falha ao salvar:', err); }
 }
 
+/** Schedules a store save 300ms out, coalescing bursts. */
 function saveDebounced() {
   if (saveTimer) return;
   saveTimer = setTimeout(saveStore, 300);
 }
 
+/** Writes a pending debounced save immediately. */
 function flushSave() {
   if (saveTimer) saveStore();
 }
 
+/** Writes config.json. */
 function saveConfig() {
   try { saveJsonAtomic(CONFIG_FILE, state.config); } catch (err) { console.error('[clp] falha ao salvar config:', err); }
 }
 
+/** File size in bytes, 0 when unreadable. */
 function sizeOf(file) {
   try { return fs.statSync(file).size; } catch { return 0; }
 }
 
+/** Directory entries, empty when unreadable. */
 function entries(dir) {
   try { return fs.readdirSync(dir); } catch { return []; }
 }
 
-// disk usage of the store + the files no clip references anymore (crash, .tmp leftover, old bug)
+/** Disk usage of the store plus the image/thumb files no clip references anymore. */
 function scanUsage() {
   const liveImages = new Set(state.store.clips.filter((c) => c.imageFile).map((c) => path.basename(c.imageFile)));
   const liveThumbs = new Set(state.store.clips.map((c) => c.id + '.png'));
@@ -103,6 +108,7 @@ function scanUsage() {
   return { bytes, images, clips: state.store.clips.length, orphans, orphanBytes };
 }
 
+/** Deletes the orphan files scanUsage found. */
 function pruneOrphans() {
   const { orphans, orphanBytes } = scanUsage();
   for (const file of orphans) {
@@ -111,10 +117,12 @@ function pruneOrphans() {
   return { removed: orphans.length, bytes: orphanBytes };
 }
 
+/** Clip id: base36 timestamp plus 4 random bytes. */
 function newId() {
   return Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
 }
 
+/** Hex sha256 of a buffer or string. */
 function sha(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
 }

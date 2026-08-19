@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# The launcher decides whether Chromium runs sandboxed, and that decision lives inside a
-# heredoc in install.sh — `bash -n` never parses it and no JS test can reach it. Pull the
-# block out, undo the heredoc's backslash escaping, and run it under the spellings a person
-# actually types. The failure this guards: a plain -n test treats NO_SANDBOX=0 and
-# NO_SANDBOX=false as "disable the sandbox", the exact opposite of what they mean.
+# Covers the sandbox decision and supervisor loop inside install.sh's heredoc. See AGENTS.md §15.
 
 set -u
 cd "$(dirname "$0")/.."
@@ -16,6 +12,7 @@ esac
 
 fails=0
 
+# Runs the extracted block under one env value and compares the resulting flag.
 check() {
   local value="$1" expected="$2" got
   if [ "$value" = "<unset>" ]; then
@@ -29,37 +26,30 @@ check() {
   fi
 }
 
-# secure by default: anything that is not an explicit yes keeps the sandbox
 for v in "<unset>" "" 0 false FALSE no NO off OFF nope 2 " "; do
   check "$v" ""
 done
 
-# the documented opt-out, and the spellings people reach for instead
 for v in 1 true TRUE True yes YES Yes on ON On; do
   check "$v" "--no-sandbox"
 done
 
 [ "$fails" -eq 0 ] || exit 1
 
-# The supervisor loop lives in the same heredoc and is just as unreachable to `bash -n`.
-# Losing any of these pieces is silent: the app stops coming back after a crash, or worse,
-# comes back after the user asked it to quit.
+# Fails when the launcher loses a piece of the supervisor loop.
 need() {
   if ! grep -qF "$1" install.sh; then
     echo "FAIL: launcher lost '$1'"
     fails=$((fails + 1))
   fi
 }
-need 'CLP_SUPERVISED=1'                     # the app reads this to pick exit-code restart
-need 'QUIT_FLAG="$HOME'                     # deliberate quit must not respawn
+need 'CLP_SUPERVISED=1'
+need 'QUIT_FLAG="$HOME'
 need 'if [ -f "\$QUIT_FLAG" ]; then'
-need '"\$tries" -gt 5'                      # crash-loop ceiling
-need 'mv -f "\$LOG" "\$LOG.1"'              # rotation, which only the shell can do
+need '"\$tries" -gt 5'
+need 'mv -f "\$LOG" "\$LOG.1"'
 need 'setsid "\$0" --_supervise'
 
-# `pkill -f "$INSTALL_DIR"` matches the whole command line, so it also kills every shell,
-# editor and pgrep that merely names the path — the -9 form killed this installer mid-run once.
-# Every pkill here must anchor on argv[0].
 if grep -nE 'pkill( -9)? -f "\$(INSTALL_DIR|\{INSTALL_DIR\})' install.sh; then
   echo "FAIL: unanchored pkill above — use the ^…/electron form"
   fails=$((fails + 1))

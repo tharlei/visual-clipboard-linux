@@ -15,7 +15,7 @@ const { snapshot, broadcast, hidePanel, refreshPanels, registerShortcut, panels 
 const { trayIcon, updateTrayMenu, isAutostart, setAutostart, electronAgeDays } = require('./tray');
 const { normalizeConfig, riskyToOpen } = require('./validate');
 
-// first bytes only — a file clip can point at a multi-gigabyte video
+/** First 64 bytes of a file as latin1 — a file clip can point at a multi-gigabyte video. */
 function readHead(file) {
   let fd;
   try {
@@ -30,9 +30,8 @@ function readHead(file) {
   }
 }
 
+/** Registers every IPC channel behind a sender check that only panel windows pass. */
 function setupIpc() {
-  // every channel below is privileged; only the panel windows may reach it. wrapping the
-  // registration instead of each handler keeps future channels covered by default.
   const fromPanel = (e) => panels().some((w) => w.webContents === e.sender);
   const handle = (ch, fn) => ipcMain.handle(ch, (e, ...a) => {
     if (!fromPanel(e)) throw new Error(`${ch}: sender não é um painel`);
@@ -75,8 +74,6 @@ function setupIpc() {
     saveDebounced();
     broadcast();
   });
-  // the path came off the clipboard, so any process on the box chose it. a .desktop or an
-  // executable handed to shell.openPath() is code execution — ask before that one.
   handle('clips:openFile', async (_e, id) => {
     const clip = state.store.clips.find((c) => c.id === id);
     const file = clip && clip.files && clip.files[0];
@@ -125,8 +122,6 @@ function setupIpc() {
     broadcast();
   });
   handle('panel:hide', () => hidePanel());
-  // deferred one tick: restartApp() exits the process, and the invoke reply has to reach the
-  // renderer first or the panel hangs on a promise that never settles
   handle('app:restart', () => { setTimeout(() => state.restartApp && state.restartApp('painel'), 100); });
   handle('stats:usage', () => {
     const u = scanUsage();
@@ -143,15 +138,11 @@ function setupIpc() {
     return isAutostart();
   });
   handle('config:update', (_e, patch) => {
-    // normalizeConfig rejects an accelerator with no modifier: a bare key registered here
-    // would swallow that key for every app on the desktop. it also keeps the current value
-    // on anything invalid, so a bad patch is a no-op rather than a reset.
     const next = normalizeConfig({ ...state.config, ...(patch || {}) }, state.config);
     const shortcutChanged = next.shortcut !== state.config.shortcut;
     const displayChanged = next.display !== state.config.display;
     state.config = next;
     if (shortcutChanged) registerShortcut();
-    // deferred: switching to fewer monitors destroys windows, and this reply may be going to one
     if (displayChanged) setTimeout(refreshPanels, 0);
     saveConfig();
     enforceCap();
@@ -160,7 +151,6 @@ function setupIpc() {
     broadcast();
     return { shortcut: state.config.shortcut };
   });
-  // drag a real file out (image/file clips) — dropping into a terminal yields the path
   on('clips:startDrag', (e, id) => {
     const clip = state.store.clips.find((c) => c.id === id);
     if (!clip) return;

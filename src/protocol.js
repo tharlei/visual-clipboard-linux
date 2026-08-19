@@ -8,15 +8,14 @@ const { pathToFileURL } = require('node:url');
 const { DATA_DIR, THUMBS_DIR, THUMB_HEIGHT, THUMB_WIDTH, MAX_IMAGE_BYTES } = require('./constants');
 const state = require('./state');
 
-// Must run before app.whenReady — main.js requires this module at the top, which
-// keeps the ordering.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'clp', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
 ]);
 
-// original when the source is already small or nativeImage can't decode it (gif/webp/svg).
+/** Clip ids whose source is served as-is: too big, undecodable, or already small enough. */
 const asIs = new Set();
 
+/** Path to a clip's thumbnail, generating it on first use, or the source when not worth shrinking. */
 function resolveThumb(id) {
   const clip = state.store.clips.find((c) => c.id === id);
   if (!clip) return null;
@@ -26,24 +25,18 @@ function resolveThumb(id) {
   if (!src) return null;
   const thumb = path.join(THUMBS_DIR, id + '.png');
   if (fs.existsSync(thumb)) return thumb;
-  // remembers "this one has no thumb" so an undecodable or already-small source is not
-  // re-read and re-decoded on the main thread on every panel show
   if (asIs.has(id)) return src;
   const serveSource = () => { asIs.add(id); return src; };
 
   let stat;
   try { stat = fs.statSync(src); } catch { return null; }
-  // decoding happens on the main thread and blocks the poll/shortcut/tray; a copied
-  // file can be arbitrarily large, so hand the oversized ones straight to the renderer
   if (stat.size > MAX_IMAGE_BYTES) return serveSource();
   const img = nativeImage.createFromPath(src);
   if (img.isEmpty()) return serveSource();
   const { width, height } = img.getSize();
-  // bound BOTH sides: a panorama capped only by height still decodes a huge bitmap
   const scale = Math.min(THUMB_HEIGHT / height, THUMB_WIDTH / width, 1);
   if (scale >= 1) return serveSource();
   try {
-    // tmp + rename, like saveJsonAtomic: a truncated thumb would be cached forever
     const tmp = thumb + '.tmp';
     const small = img.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) });
     fs.writeFileSync(tmp, small.toPNG(), { mode: 0o600 });
@@ -55,6 +48,7 @@ function resolveThumb(id) {
   }
 }
 
+/** Serves clp://img/<id>, clp://file/<id>/<i> and clp://thumb/<id> from the in-memory store. */
 function registerClpProtocol() {
   protocol.handle('clp', (req) => {
     try {

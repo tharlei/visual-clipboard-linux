@@ -48,7 +48,6 @@ const state = {
   pendingShortcut: 'Control+Alt+V',
 };
 
-// panel hidden = zero DOM work; main sends panel:shown / panel:hidden on every show/hide path
 let panelVisible = false;
 
 const $ = (sel) => document.querySelector(sel);
@@ -116,8 +115,6 @@ function visibleClips() {
   });
 }
 
-// ---------- render ----------
-
 function renderTabs() {
   let html = TYPE_TABS.map((t) => `
     <span class="glass-chip glass-chip--tab ${state.tab === t.key ? 'is-active' : ''}" data-tab="${t.key}">
@@ -148,7 +145,6 @@ function cardBody(c) {
       inner = `<div class="clip-card__thumb"><img src="clp://thumb/${c.id}" loading="lazy" decoding="async" alt="" /></div>`;
       label = name;
     } else if (c.fileKind === 'video') {
-      // transparent windows don't composite the video layer — thumbs come from an offscreen canvas
       const cached = thumbCache.get(c.id);
       if (cached === 'ERR') {
         inner = `<div class="clip-card__file">${ICONS.doc}<span>${name}${count}</span></div>`;
@@ -233,7 +229,6 @@ function render() {
   const focused = cardsEl.children[state.focusIndex];
   if (focused) focused.scrollIntoView({ inline: 'nearest', block: 'nearest' });
 
-  // CSP blocks inline handlers — wire media fallbacks here
   cardsEl.querySelectorAll('[data-vthumb]').forEach((el) => requestVideoThumb(el.dataset.vthumb, el.dataset.clip));
   cardsEl.querySelectorAll('img').forEach((m) => {
     m.addEventListener('error', () => brokenThumb(m), { once: true });
@@ -249,7 +244,6 @@ function brokenThumb(el) {
   if (thumb) thumb.outerHTML = `<div class="clip-card__file">${ICONS.doc}<span>arquivo indisponível</span></div>`;
 }
 
-// one decode per clip, ever — re-renders reuse the cached data URL
 function requestVideoThumb(src, id) {
   if (thumbPending.has(id) || thumbCache.has(id)) return;
   thumbPending.add(id);
@@ -265,7 +259,6 @@ function requestVideoThumb(src, id) {
   v.preload = 'metadata';
   v.src = src;
   v.addEventListener('loadedmetadata', () => {
-    // 10% in (capped at 3s) — frame 0 of many videos is blank
     try { v.currentTime = Math.min((v.duration || 1) * 0.1, 3); } catch {}
   }, { once: true });
   v.addEventListener('seeked', () => {
@@ -282,7 +275,6 @@ function requestVideoThumb(src, id) {
   }, { once: true });
   v.addEventListener('error', fail, { once: true });
 
-  // hiding the panel mid-decode aborts the <video> — retry on later renders, give up after 3
   function fail() {
     console.log(`vthumb fail id=${id} err=${v.error && v.error.code}:${v.error && v.error.message} state=${v.readyState} net=${v.networkState}`);
     const n = (thumbFails.get(id) || 0) + 1;
@@ -293,8 +285,6 @@ function requestVideoThumb(src, id) {
     v.load();
   }
 }
-
-// ---------- overlays ----------
 
 async function openEditor(id) {
   state.editingId = id;
@@ -416,8 +406,6 @@ function overlayOpen() {
   return !editorEl.hidden || !boardModal.hidden || !settingsEl.hidden;
 }
 
-// ---------- events ----------
-
 tabsEl.addEventListener('click', (e) => {
   const del = e.target.closest('[data-delboard]');
   if (del) { window.clp.deleteBoard(del.dataset.delboard); return; }
@@ -493,7 +481,7 @@ document.addEventListener('keydown', (e) => {
       if (e.altKey) mods.push('Alt');
       if (e.shiftKey) mods.push('Shift');
       if (e.metaKey) mods.push('Super');
-      if (!mods.length) return; // require a modifier — bare keys would hijack that key globally
+      if (!mods.length) return;
       const key = KEYMAP[e.key] || (e.key.length === 1 ? e.key.toUpperCase() : e.key);
       state.pendingShortcut = [...mods, key].join('+');
       state.capturing = false;
@@ -579,7 +567,6 @@ shortcutCaptureBtn.addEventListener('click', () => {
   shortcutCaptureBtn.textContent = 'Pressione as teclas…';
 });
 
-// drag a card out: image/file → real file (path in a terminal); text → one line
 cardsEl.addEventListener('dragstart', (e) => {
   const card = e.target.closest('.clip-card');
   if (!card) return;
@@ -593,8 +580,6 @@ cardsEl.addEventListener('dragstart', (e) => {
     e.dataTransfer.effectAllowed = 'copy';
   }
 });
-
-// ---------- wiring ----------
 
 function applySnapshot(snap) {
   panelVisible = snap.visible;
@@ -630,7 +615,7 @@ window.clp.onChanged(applySnapshot);
 window.clp.onHidden(() => {
   panelVisible = false;
   state.openPopId = null;
-  cardsEl.innerHTML = ''; // free DOM, decoded bitmaps and GPU textures while hidden
+  cardsEl.innerHTML = '';
   window.clp.purgeCache();
 });
 

@@ -18,8 +18,7 @@ const { matchesIgnore } = require('./validate');
 let imgGate = { len: -1, head: null, sig: null };
 let lastFmtKey = null;
 
-// ---------- reading ----------
-
+/** Absolute paths from the file:// URIs in a uri-list payload. */
 function parseFileUris(text) {
   return text.split('\n')
     .map((l) => l.trim())
@@ -28,6 +27,7 @@ function parseFileUris(text) {
     .filter(Boolean);
 }
 
+/** 'image' | 'video' | 'other', from the extension. */
 function fileKindOf(filePath) {
   const ext = path.extname(filePath).slice(1).toLowerCase();
   if (IMAGE_EXTS.has(ext)) return 'image';
@@ -35,6 +35,7 @@ function fileKindOf(filePath) {
   return 'other';
 }
 
+/** sha256 of an image buffer, reusing the last one when length and first 4KB are unchanged. */
 function shaImage(png) {
   const head = png.subarray(0, 4096);
   if (imgGate.len === png.length && imgGate.head && head.equals(imgGate.head)) return imgGate.sig;
@@ -43,13 +44,10 @@ function shaImage(png) {
   return sig;
 }
 
-// Reads current clipboard into { sig, kind?, skip?, ...payload }. sig === null => empty.
+/** Reads current clipboard into { sig, kind?, skip?, ...payload }. sig === null means empty. */
 function readClipboard() {
   const formats = clipboard.availableFormats();
 
-  // availableFormats() is free; reading the bytes of a selection owned by another X11
-  // client is not — Chromium retains a copy of the whole buffer on every call. Treat a
-  // change in the target list as the only routine reason to re-read image bytes.
   const fmtKey = formats.join('|');
   if (fmtKey !== lastFmtKey) {
     lastFmtKey = fmtKey;
@@ -60,7 +58,6 @@ function readClipboard() {
     return { sig: 'secret:' + sha(clipboard.readText() || ''), skip: true };
   }
 
-  // custom targets are readable but never listed by availableFormats() — probe directly
   let fileBuf = clipboard.readBuffer(GNOME_FILES_FORMAT);
   if (!fileBuf.length) fileBuf = clipboard.readBuffer('text/uri-list');
   if (fileBuf && fileBuf.length) {
@@ -70,9 +67,6 @@ function readClipboard() {
 
   const imgFormat = formats.find((f) => f.startsWith('image/'));
   if (imgFormat) {
-    // an unchanged image target list means the same image: re-reading it 2x/s would retain
-    // the whole PNG every time (GBs per hour). showPanel() sets imageDue so a second image
-    // copied from the same app is still picked up before the user looks at the history.
     if (!state.imageDue) return { sig: state.lastSig };
     state.imageDue = false;
     const png = clipboard.readBuffer('image/png');
@@ -80,9 +74,6 @@ function readClipboard() {
       if (png.length > MAX_IMAGE_BYTES) return { sig: 'I:big:' + png.length, skip: true };
       return { sig: 'I:' + shaImage(png), kind: 'image', png };
     }
-    // clipboard.readImage() decodes the bitmap and leaks ~10 KB per megapixel inside
-    // Chromium's X11 clipboard — at 2 polls/s that is GBs per hour. readBuffer never
-    // decodes, so hash the raw target bytes and only decode when they actually change.
     const raw = clipboard.readBuffer(imgFormat);
     const sig = raw.length ? 'I:' + shaImage(raw) : 'I:fmt:' + imgFormat;
     if (sig === state.lastSig) return { sig };
@@ -99,6 +90,7 @@ function readClipboard() {
   return { sig: 'T:' + sha(text), kind: 'text', text };
 }
 
+/** 'link' | 'code' | 'text', from shape and keyword density. */
 function classifyText(text) {
   const t = text.trim();
   if (/^https?:\/\/\S+$/i.test(t) && !/\s/.test(t)) return 'link';
@@ -110,11 +102,8 @@ function classifyText(text) {
   return 'text';
 }
 
-// ---------- capture ----------
-
+/** One clipboard tick: reads, times the read, and captures when the signature changed. */
 function poll() {
-  // paused: read nothing at all. setPaused() reseeds lastSig on resume so whatever was
-  // copied during the pause is not swept up by the first poll after it.
   if (state.config.paused) return;
   let r;
   state.pollCount++;
@@ -128,9 +117,6 @@ function poll() {
   } finally {
     const ms = Date.now() - t0;
     if (ms > state.pollMaxMs) state.pollMaxMs = ms;
-    // the kind is what makes this actionable: an image read stalls on the X11 selection
-    // transfer, a text one does not, and the two want different fixes. No kind means the image
-    // read was gated off (imageDue false), so the stall was in reading the format list itself.
     if (ms > POLL_SLOW_MS) {
       console.warn(`[clp] poll lento ${ms}ms tipo=${(r && r.kind) || 'nenhum'} — main travado nesse intervalo`);
     }
@@ -143,6 +129,7 @@ function poll() {
   try { capture(r); } catch (err) { console.error('[clp] capture:', err); }
 }
 
+/** Stores a read as a new clip, or bumps the existing one with the same signature to the top. */
 function capture(r) {
   const existing = state.store.clips.find((c) => c.hash === r.sig);
   if (existing) {
@@ -197,6 +184,7 @@ function capture(r) {
   broadcast();
 }
 
+/** Removes a clip's stored image and thumbnail from disk. */
 function deleteImageFile(clip) {
   if (clip.imageFile) {
     try { fs.unlinkSync(path.join(DATA_DIR, clip.imageFile)); } catch {}
@@ -204,6 +192,7 @@ function deleteImageFile(clip) {
   try { fs.unlinkSync(path.join(THUMBS_DIR, clip.id + '.png')); } catch {}
 }
 
+/** Drops the oldest evictable clips (not pinned, in no board) down to maxItems. */
 function enforceCap() {
   const evictable = () => state.store.clips.filter((c) => !c.pinned && c.boardIds.length === 0);
   let extra = evictable().length - state.config.maxItems;
@@ -217,8 +206,7 @@ function enforceCap() {
   }
 }
 
-// ---------- write back / select ----------
-
+/** Puts a clip back on the clipboard and presets lastSig so the poll ignores our own write. */
 function writeClipToClipboard(clip) {
   if (clip.type === 'image') {
     clipboard.writeImage(nativeImage.createFromPath(path.join(DATA_DIR, clip.imageFile)));
@@ -228,10 +216,10 @@ function writeClipToClipboard(clip) {
   } else {
     clipboard.writeText(clip.text);
   }
-  // read-back presets the signature so the watcher never re-captures our own write
   try { state.lastSig = readClipboard().sig; } catch {}
 }
 
+/** Fires ctrl+v through xdotool after the configured delay, when enabled and available. */
 function autoPaste() {
   if (!state.hasXdotool || !state.config.autoPaste) return;
   setTimeout(() => {
@@ -241,6 +229,7 @@ function autoPaste() {
   }, state.config.pasteDelayMs);
 }
 
+/** Copies a clip, hides the panel and auto-pastes. */
 function selectClip(id) {
   const clip = state.store.clips.find((c) => c.id === id);
   if (!clip) return;
@@ -249,6 +238,7 @@ function selectClip(id) {
   autoPaste();
 }
 
+/** Probes for xdotool and broadcasts the capability. */
 function detectXdotool() {
   execFile('xdotool', ['version'], (err) => {
     state.hasXdotool = !err;
@@ -257,6 +247,7 @@ function detectXdotool() {
   });
 }
 
+/** Deletes every clip that is neither pinned nor in a board. */
 function clearHistory() {
   for (const c of state.store.clips) {
     if (!c.pinned && c.boardIds.length === 0) deleteImageFile(c);
