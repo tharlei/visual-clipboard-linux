@@ -1,6 +1,6 @@
 {
   "name": "visual-clipboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Gerenciador de clipboard para Linux inspirado no Clp (clp.erick.page)",
   "main": "main.js",
   "scripts": {
